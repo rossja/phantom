@@ -103,6 +103,7 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 					uptime: Math.floor((Date.now() - startedAt) / 1000),
 					version: VERSION,
 					agent: config.name,
+					...(config.public_url ? { public_url: config.public_url } : {}),
 					role: roleInfo ?? { id: config.role, name: config.role },
 					channels,
 					memory,
