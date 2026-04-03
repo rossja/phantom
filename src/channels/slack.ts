@@ -43,6 +43,7 @@ export class SlackChannel implements Channel {
 	private ownerUserId: string | null;
 	private phantomName: string;
 	private rejectedUsers = new Set<string>();
+	private participatedThreads = new Set<string>();
 
 	constructor(config: SlackChannelConfig) {
 		this.app = new App({
@@ -148,6 +149,11 @@ export class SlackChannel implements Channel {
 				thread_ts: replyThreadTs,
 			});
 			lastTs = result.ts ?? "";
+		}
+
+		// Track thread participation so we can respond to replies without @ mention
+		if (replyThreadTs) {
+			this.participatedThreads.add(`${channel}:${replyThreadTs}`);
 		}
 
 		return {
@@ -334,7 +340,13 @@ export class SlackChannel implements Channel {
 			if (this.botUserId && userId === this.botUserId) return;
 
 			const channelType = msg.channel_type as string | undefined;
-			if (channelType !== "im") return;
+			if (channelType !== "im") {
+				// In channels, only respond to thread replies in threads we've participated in
+				const incomingThreadTs = msg.thread_ts as string | undefined;
+				if (!incomingThreadTs) return;
+				const threadKey = `${msg.channel as string}:${incomingThreadTs}`;
+				if (!this.participatedThreads.has(threadKey)) return;
+			}
 
 			if (userId && !this.isOwner(userId)) {
 				console.log(`[slack] Ignoring DM from non-owner: ${userId}`);
