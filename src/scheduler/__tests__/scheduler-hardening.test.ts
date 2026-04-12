@@ -842,6 +842,54 @@ describe("Phase 2.5 scheduler fixes", () => {
 			).toThrow(/job limit/);
 		});
 	});
+
+	// ---------- N3 regression: setTimeout int32 overflow clamp ----------
+
+	describe("N3 regression: armTimer clamps delay to prevent setTimeout int32 overflow", () => {
+		test("setTimeout is never called with a delay larger than one hour", async () => {
+			// Regression guard: any job whose next fire is more than ~24.8 days
+			// away would overflow the 32-bit setTimeout delay and cause a hot
+			// armTimer -> onTimer -> armTimer spin loop (Codex P1 on PR #51).
+			// The clamp in service.ts armTimer must apply before setTimeout.
+			const HOUR_MS = 60 * 60 * 1000;
+			const captured: number[] = [];
+			const originalSetTimeout = globalThis.setTimeout;
+			// Replace global setTimeout with a capturing wrapper. We hand work
+			// off to a harmless long-delay real timer (well below int32 max),
+			// and call stop() before any callback fires, so nothing executes.
+			globalThis.setTimeout = ((fn: (...args: unknown[]) => void, delay?: number, ...rest: unknown[]) => {
+				if (typeof delay === "number") captured.push(delay);
+				return originalSetTimeout(fn, 1_000_000, ...(rest as never[]));
+			}) as typeof setTimeout;
+
+			try {
+				// 100 days in ms (~8.64e9) is vastly above the ~2.15e9 int32
+				// ceiling. Without the clamp, setTimeout would receive this
+				// value and coerce it to roughly 1 ms.
+				const farFuture = new Date(Date.now() + 100 * 24 * 60 * 60 * 1000).toISOString();
+				db.run(
+					`INSERT INTO scheduled_jobs (id, name, schedule_kind, schedule_value, task, next_run_at)
+					 VALUES (?, ?, 'every', ?, 'task', ?)`,
+					["n3-far", "FarFuture", JSON.stringify({ intervalMs: 60_000 }), farFuture],
+				);
+
+				const runtime = createMockRuntime();
+				const scheduler = new Scheduler({ db, runtime: runtime as never });
+				await scheduler.start();
+				scheduler.stop();
+
+				// At least one setTimeout call happened during start() -> armTimer.
+				expect(captured.length).toBeGreaterThan(0);
+				// Every captured delay must be within the one-hour clamp, not
+				// the raw 100-day value. This assertion fails if the clamp is
+				// ever removed again.
+				const overLimit = captured.filter((d) => d > HOUR_MS);
+				expect(overLimit).toEqual([]);
+			} finally {
+				globalThis.setTimeout = originalSetTimeout;
+			}
+		});
+	});
 });
 
 // ---------- Runtime C2 belt: AgentRuntime isSessionBusy / Error bounce ----------

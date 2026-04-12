@@ -10,6 +10,17 @@ import { rowToJob } from "./row-mapper.ts";
 import { computeNextRunAt, serializeScheduleValue } from "./schedule.ts";
 import type { JobCreateInput, JobRow, ScheduledJob } from "./types.ts";
 
+// Upper bound on the setTimeout delay we pass when arming the next wake-up.
+// Both Node and Bun use a 32-bit signed integer for the setTimeout delay, so
+// any value above 2^31-1 ms (roughly 24.8 days) silently coerces to about one
+// millisecond, which would turn armTimer -> onTimer -> armTimer into a hot
+// spin loop for any job whose next fire is more than a few weeks out (long
+// at-schedules, cron expressions whose next firing is far in the future,
+// every-schedules with large intervals). One hour gives us a ~600x safety
+// margin under the overflow boundary while keeping the idle re-arm cost to
+// one indexed SQL MIN query per hour, which is effectively free.
+const MAX_TIMER_MS = 60 * 60 * 1000;
+
 type SchedulerDeps = {
 	db: Database;
 	runtime: AgentRuntime;
@@ -199,10 +210,14 @@ export class Scheduler {
 
 		if (!row?.next) return;
 
-		// N3: sleep until the actual fire. Bun and Node both accept very long
-		// delays here; the old 60s clamp was historical paranoia.
+		// Clamp the setTimeout delay to MAX_TIMER_MS (1 hour) to avoid the
+		// 32-bit overflow described on the constant: any value above ~24.8 days
+		// would be coerced to roughly 1 ms and hot-loop armTimer. When the next
+		// fire is within the clamp we wake at the exact fire time; otherwise
+		// we wake at the clamp, re-evaluate the MIN query, and re-arm.
 		const delay = Math.max(0, new Date(row.next).getTime() - Date.now());
-		this.timer = setTimeout(() => this.onTimer(), delay);
+		const clamped = Math.min(delay, MAX_TIMER_MS);
+		this.timer = setTimeout(() => this.onTimer(), clamped);
 	}
 
 	private async onTimer(): Promise<void> {
