@@ -75,12 +75,8 @@ describe("wrapInBaseTemplate placeholder substitution", () => {
 	});
 
 	test("removes all placeholder markers after substitution", () => {
-		// {{AGENT_NAME}} is exposed as a substitution slot for future templates
-		// that need the raw env-var form. Verify no stray placeholder markers
-		// leak into the rendered output regardless of which form the template
-		// references.
+		// Verify no stray placeholder markers leak into the rendered output.
 		const html = wrapInBaseTemplate("Test", "<h1>Hi</h1>", "cheeks");
-		expect(html).not.toContain("{{AGENT_NAME}}");
 		expect(html).not.toContain("{{AGENT_NAME_CAPITALIZED}}");
 		expect(html).not.toContain("{{AGENT_NAME_INITIAL}}");
 		expect(html).not.toContain("{{TITLE}}");
@@ -110,5 +106,49 @@ describe("wrapInBaseTemplate placeholder substitution", () => {
 		expect(html).toContain("id='probe'");
 		expect(html).not.toContain("{{TITLE}}");
 		expect(html).not.toContain("<!-- Agent writes content here -->");
+	});
+});
+
+describe("wrapInBaseTemplate dollar-pattern safety", () => {
+	test("preserves $& in content literally", () => {
+		const out = wrapInBaseTemplate("Test", "<p>Price: $&now</p>", "cheeks");
+		expect(out).toContain("<p>Price: $&now</p>");
+		expect(out).not.toContain("<!-- Agent writes content here -->");
+	});
+
+	test("preserves $`, $', $$ in content literally", () => {
+		const out = wrapInBaseTemplate("Test", "<p>$` $' $$ here</p>", "cheeks");
+		expect(out).toContain("<p>$` $' $$ here</p>");
+	});
+
+	test("does not re-substitute placeholder literals in title", () => {
+		// escapeHtml leaves { and } alone, so the literal survives to the
+		// title. A single-pass replacement prevents the title from being
+		// substituted a second time through the AGENT_NAME_CAPITALIZED slot.
+		const out = wrapInBaseTemplate("{{AGENT_NAME_CAPITALIZED}}", "<p>hi</p>", "cheeks");
+		expect(out).toContain("{{AGENT_NAME_CAPITALIZED}}");
+		// The navbar and footer agent name slots are still correctly substituted.
+		expect(out).not.toContain("{{AGENT_NAME_INITIAL}}");
+		expect(out).toContain("Cheeks");
+	});
+
+	test("escapes HTML-special agent names", () => {
+		const out = wrapInBaseTemplate("Test", "<p>hi</p>", "<script>alert(1)</script>");
+		expect(out).not.toContain("<script>alert(1)</script>");
+		expect(out).toContain("&lt;script&gt;");
+	});
+
+	test("does not re-scan substituted values for placeholder tokens", () => {
+		// Second-order injection check: if a substituted value happens to
+		// itself contain a placeholder token, the single-pass regex must not
+		// recurse and rewrite it on a second pass. A title value that looks
+		// like "{{AGENT_NAME_INITIAL}}" should land in the rendered title as
+		// that literal string (escapeHtml leaves braces alone), while the
+		// real initial slot in the navbar template still resolves to "C".
+		const out = wrapInBaseTemplate("{{AGENT_NAME_INITIAL}}", "<p>hi</p>", "cheeks");
+		// The literal survives in the title position.
+		expect(out).toContain("{{AGENT_NAME_INITIAL}}");
+		// The navbar agent name slot is still substituted cleanly.
+		expect(out).toContain("Cheeks");
 	});
 });

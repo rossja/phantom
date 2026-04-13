@@ -5,7 +5,8 @@
 // module-level setter wired from src/index.ts at startup so this file stays
 // callable from src/ui/serve.ts with no signature change.
 
-import { capitalizeAgentName } from "./name.ts";
+import { escapeHtml } from "./html.ts";
+import { agentNameInitial, capitalizeAgentName } from "./name.ts";
 
 let configuredAgentName = "Phantom";
 
@@ -15,12 +16,14 @@ export function setLoginPageAgentName(name: string): void {
 
 export function loginPageHtml(): string {
 	const displayName = capitalizeAgentName(configuredAgentName);
+	const safeName = escapeHtml(displayName);
+	const safeInitial = escapeHtml(agentNameInitial(displayName));
 	return `<!DOCTYPE html>
 <html lang="en" data-theme="phantom-light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in - ${displayName}</title>
+<title>Sign in - ${safeName}</title>
 <link rel="icon" href="data:,">
 <script>
 (function(){var s=localStorage.getItem('phantom-theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',s||(d?'phantom-dark':'phantom-light'));})();
@@ -85,8 +88,8 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
 
 <div class="top-bar">
   <a href="/ui/" class="brand">
-    <span class="brand-logo">${displayName.charAt(0).toUpperCase()}</span>
-    <span>${displayName}</span>
+    <span class="brand-logo">${safeInitial}</span>
+    <span>${safeName}</span>
   </a>
   <button id="theme-toggle" class="top-action" aria-label="Toggle theme">
     <svg id="icon-moon" style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg>
@@ -99,7 +102,7 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
   <div class="login-shell">
 
     <h1 class="login-display">Welcome <em>back</em>.</h1>
-    <p class="login-subtitle">Sign in with the access token ${displayName} sent you, or paste a magic link.</p>
+    <p class="login-subtitle">Sign in with the access token ${safeName} sent you, or paste a magic link.</p>
 
     <form id="login-form" autocomplete="off">
 
@@ -128,13 +131,13 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
       <div class="divider-line"></div>
     </div>
 
-    <p class="helper">Ask ${displayName} in Slack for a magic link.<br>It is valid for 10 minutes and the resulting session lasts 7 days.</p>
+    <p class="helper">Ask ${safeName} in Slack for a magic link.<br>It is valid for 10 minutes and the resulting session lasts 7 days.</p>
 
   </div>
 </main>
 
 <div class="footer-strip">
-  <span>${displayName} - AI that works alongside you</span>
+  <span>${safeName} - AI that works alongside you</span>
   <span>cookie auth</span>
 </div>
 

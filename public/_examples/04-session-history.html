@@ -3,18 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title data-agent-name-title>Session history</title>
+<title data-agent-name-title>{{AGENT_NAME_CAPITALIZED}} sessions</title>
 <link rel="icon" href="data:,">
 <script>(function(){var s=localStorage.getItem('phantom-theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',s||(d?'phantom-dark':'phantom-light'));})();</script>
-<script>
-(function(){
-  function cap(n){if(!n)return "";var t=String(n).trim();if(!t)return "";return t.split(/([-_])/).map(function(p){if(p==="-"||p==="_")return p;if(!p.length)return p;return p.charAt(0).toUpperCase()+p.slice(1).toLowerCase();}).join("");}
-  function apply(name){if(!name)return;var disp=cap(name);var initial=disp?disp.charAt(0).toUpperCase():"P";document.querySelectorAll("[data-agent-name]").forEach(function(el){el.textContent=disp;});document.querySelectorAll("[data-agent-name-initial]").forEach(function(el){el.textContent=initial;});var t=document.querySelector("title[data-agent-name-title]");if(t){t.textContent=disp+" sessions";}}
-  var cached=localStorage.getItem("phantom-agent-name")||"";if(cached){apply(cached);}
-  fetch("/health").then(function(r){return r.json();}).then(function(d){if(d&&d.agent){localStorage.setItem("phantom-agent-name",d.agent);apply(d.agent);}}).catch(function(){});
-  document.addEventListener("DOMContentLoaded",function(){var c=localStorage.getItem("phantom-agent-name")||"";if(c)apply(c);});
-})();
-</script>
+<script src="/ui/_agent-name.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -47,7 +39,7 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
 
 .phantom-row { display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; }
 
-.phantom-chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 12px; border:1px solid var(--color-base-300); border-radius:var(--radius-pill); background:transparent; color:var(--color-base-content); cursor:pointer; transition:all 100ms; }
+.phantom-chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 12px; border:1px solid var(--color-base-300); border-radius:var(--radius-pill); background:transparent; color:var(--color-base-content); cursor:pointer; transition:border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out); }
 .phantom-chip:hover { border-color:color-mix(in oklab, var(--color-primary) 40%, var(--color-base-300)); background:color-mix(in oklab, var(--color-primary) 4%, transparent); }
 .phantom-chip[aria-pressed="true"] { background:color-mix(in oklab, var(--color-primary) 10%, transparent); border-color:color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300)); color:var(--color-primary); }
 

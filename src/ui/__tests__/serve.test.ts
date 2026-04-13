@@ -29,7 +29,6 @@ describe("login page", () => {
 		const res = await handleUiRequest(req("/ui/login"));
 		expect(res.status).toBe(200);
 		const body = await res.text();
-		expect(body).toContain("Phantom");
 		expect(body).toContain("login-form");
 		expect(body).toContain("Access token");
 	});

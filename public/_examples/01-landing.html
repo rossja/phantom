@@ -3,31 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title data-agent-name-title>&nbsp;</title>
+<title data-agent-name-title>{{AGENT_NAME_CAPITALIZED}}</title>
 <link rel="icon" href="data:,">
 <script>(function(){var s=localStorage.getItem('phantom-theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',s||(d?'phantom-dark':'phantom-light'));})();</script>
-<script>
-// Agent-name customization: fetches the deployed agent name from /health and
-// patches every element marked with a data-agent-name attribute. Cached in
-// localStorage so warm loads paint the brand on first paint with no flash.
-(function(){
-  function cap(n){if(!n)return "";var t=String(n).trim();if(!t)return "";return t.split(/([-_])/).map(function(p){if(p==="-"||p==="_")return p;if(!p.length)return p;return p.charAt(0).toUpperCase()+p.slice(1).toLowerCase();}).join("");}
-  function apply(name){
-    if(!name)return;
-    var disp=cap(name);
-    var initial=disp?disp.charAt(0).toUpperCase():"P";
-    document.querySelectorAll("[data-agent-name]").forEach(function(el){el.textContent=disp;});
-    document.querySelectorAll("[data-agent-name-initial]").forEach(function(el){el.textContent=initial;});
-    document.querySelectorAll("[data-agent-name-lower]").forEach(function(el){el.textContent=String(name).toLowerCase();});
-    var t=document.querySelector("title[data-agent-name-title]");
-    if(t){t.textContent=disp;}
-  }
-  var cached=localStorage.getItem("phantom-agent-name")||"";
-  if(cached){apply(cached);}
-  fetch("/health").then(function(r){return r.json();}).then(function(d){if(d&&d.agent){localStorage.setItem("phantom-agent-name",d.agent);apply(d.agent);}}).catch(function(){});
-  document.addEventListener("DOMContentLoaded",function(){var c=localStorage.getItem("phantom-agent-name")||"";if(c)apply(c);});
-})();
-</script>
+<script src="/ui/_agent-name.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">

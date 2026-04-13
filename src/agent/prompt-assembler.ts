@@ -1,11 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
 import type { RoleTemplate } from "../roles/types.ts";
+import { buildEvolvedSections } from "./prompt-blocks/evolved.ts";
 import { buildInstructions } from "./prompt-blocks/instructions.ts";
 import { buildSecurity } from "./prompt-blocks/security.ts";
 import { buildUIGuidanceLines } from "./prompt-blocks/ui-guidance.ts";
+import { buildWorkingMemory } from "./prompt-blocks/working-memory.ts";
 
 export function assemblePrompt(
 	config: PhantomConfig,
@@ -212,85 +214,10 @@ function buildEnvironment(config: PhantomConfig): string {
 	return lines.join("\n");
 }
 
-function buildEvolvedSections(evolved: EvolvedConfig): string {
-	const parts: string[] = [];
-
-	if (evolved.constitution.trim()) {
-		parts.push(`# Constitution\n\n${evolved.constitution.trim()}`);
-	}
-
-	if (evolved.persona.trim() && countContentLines(evolved.persona) > 1) {
-		parts.push(`# Communication Style\n\n${evolved.persona.trim()}`);
-	}
-
-	if (evolved.userProfile.trim() && countContentLines(evolved.userProfile) > 1) {
-		parts.push(`# User Profile\n\n${evolved.userProfile.trim()}`);
-	}
-
-	if (evolved.domainKnowledge.trim() && countContentLines(evolved.domainKnowledge) > 1) {
-		parts.push(`# Domain Knowledge\n\n${evolved.domainKnowledge.trim()}`);
-	}
-
-	const strategyParts: string[] = [];
-	if (evolved.strategies.taskPatterns.trim() && countContentLines(evolved.strategies.taskPatterns) > 1) {
-		strategyParts.push(evolved.strategies.taskPatterns.trim());
-	}
-	if (evolved.strategies.toolPreferences.trim() && countContentLines(evolved.strategies.toolPreferences) > 1) {
-		strategyParts.push(evolved.strategies.toolPreferences.trim());
-	}
-	if (evolved.strategies.errorRecovery.trim() && countContentLines(evolved.strategies.errorRecovery) > 1) {
-		strategyParts.push(evolved.strategies.errorRecovery.trim());
-	}
-	if (strategyParts.length > 0) {
-		parts.push(`# Learned Strategies\n\n${strategyParts.join("\n\n")}`);
-	}
-
-	if (parts.length === 0) return "";
-
-	return parts.join("\n\n");
-}
-
 function buildMemorySection(memoryContext: string): string {
 	return `# Your Memory\n\nPersistent memory from previous sessions. Use this to maintain continuity.\n\n${memoryContext}`;
 }
 
 function buildFallbackRoleHint(config: PhantomConfig): string {
 	return `Your role is ${config.role}. Approach every task with that expertise.`;
-}
-
-// Truncates to MAX_LINES with a compaction warning if the file grows too large.
-function buildWorkingMemory(dataDir: string): string {
-	const wmPath = join(dataDir, "working-memory.md");
-	try {
-		if (!existsSync(wmPath)) return "";
-		const content = readFileSync(wmPath, "utf-8").trim();
-		if (!content) return "";
-
-		const lines = content.split("\n");
-		const MAX_LINES = 75;
-
-		if (lines.length > MAX_LINES) {
-			const header = lines.slice(0, 3);
-			const recent = lines.slice(-(MAX_LINES - 5));
-			const truncated = [
-				...header,
-				"",
-				"<!-- Working memory was truncated. Please compact this file. -->",
-				"",
-				...recent,
-			].join("\n");
-			return `# Working Memory\n\nThese are your personal notes. You wrote them to remember important things across conversations. Trust them.\n\nNOTE: Your working memory is at ${lines.length} lines (target: 50). Please compact it by summarizing older entries and removing facts that are no longer relevant.\n\n${truncated}`;
-		}
-
-		return `# Working Memory\n\nThese are your personal notes. You wrote them to remember important things across conversations. Trust them.\n\n${content}`;
-	} catch {
-		return "";
-	}
-}
-
-function countContentLines(text: string): number {
-	return text.split("\n").filter((line) => {
-		const trimmed = line.trim();
-		return trimmed !== "" && !trimmed.startsWith("#");
-	}).length;
 }

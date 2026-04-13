@@ -3,18 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title data-agent-name-title>Cost report</title>
+<title data-agent-name-title>{{AGENT_NAME_CAPITALIZED}} cost report</title>
 <link rel="icon" href="data:,">
 <script>(function(){var s=localStorage.getItem('phantom-theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',s||(d?'phantom-dark':'phantom-light'));})();</script>
-<script>
-(function(){
-  function cap(n){if(!n)return "";var t=String(n).trim();if(!t)return "";return t.split(/([-_])/).map(function(p){if(p==="-"||p==="_")return p;if(!p.length)return p;return p.charAt(0).toUpperCase()+p.slice(1).toLowerCase();}).join("");}
-  function apply(name){if(!name)return;var disp=cap(name);var initial=disp?disp.charAt(0).toUpperCase():"P";document.querySelectorAll("[data-agent-name]").forEach(function(el){el.textContent=disp;});document.querySelectorAll("[data-agent-name-initial]").forEach(function(el){el.textContent=initial;});var t=document.querySelector("title[data-agent-name-title]");if(t){t.textContent=disp+" cost report";}}
-  var cached=localStorage.getItem("phantom-agent-name")||"";if(cached){apply(cached);}
-  fetch("/health").then(function(r){return r.json();}).then(function(d){if(d&&d.agent){localStorage.setItem("phantom-agent-name",d.agent);apply(d.agent);}}).catch(function(){});
-  document.addEventListener("DOMContentLoaded",function(){var c=localStorage.getItem("phantom-agent-name")||"";if(c)apply(c);});
-})();
-</script>
+<script src="/ui/_agent-name.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -170,8 +162,21 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
 })();
 </script>
 <script>
+/* Chart example: self-contained. On wrapped pages, use window.phantomChart instead. */
 (function(){
-  function colors(){ var dark=document.documentElement.getAttribute('data-theme')==='phantom-dark'; return { line: dark?'#7078e0':'#4850c4', text: dark?'#a8a29e':'#57534e', grid: dark?'#26211d':'#ece9df', purple: dark?'#a78bfa':'#8b5cf6', amber: dark?'#fbbf24':'#ca8a04', sage: dark?'#86efac':'#16a34a' }; }
+  function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function colors(){
+    return {
+      line: cssVar('--color-primary'),
+      text: cssVar('--color-base-content'),
+      grid: cssVar('--color-base-300'),
+      tooltipBg: cssVar('--color-base-content'),
+      tooltipText: cssVar('--color-base-100'),
+      info: cssVar('--color-info'),
+      warning: cssVar('--color-warning'),
+      success: cssVar('--color-success'),
+    };
+  }
   var lineChart, barChart;
   function init(){
     var el=document.getElementById('line-chart');
@@ -183,10 +188,10 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
     lineChart.setOption({
       backgroundColor:'transparent',
       grid:{left:42,right:16,top:16,bottom:24},
-      tooltip:{trigger:'axis',backgroundColor:'rgba(20,20,20,0.92)',borderWidth:0,textStyle:{color:'#fff',fontSize:12}},
+      tooltip:{trigger:'axis',backgroundColor:c.tooltipBg,borderWidth:0,textStyle:{color:c.tooltipText,fontSize:12}},
       xAxis:{type:'category',data:dates,axisLine:{lineStyle:{color:c.grid}},axisLabel:{color:c.text,fontFamily:'JetBrains Mono,monospace',fontSize:10}},
       yAxis:{type:'value',axisLine:{show:false},splitLine:{lineStyle:{color:c.grid}},axisLabel:{color:c.text,fontFamily:'JetBrains Mono,monospace',fontSize:10,formatter:'${value}'}},
-      series:[{type:'line',data:data,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:c.line,width:2},itemStyle:{color:c.line},areaStyle:{color:'rgba(72,80,196,0.12)'}}]
+      series:[{type:'line',data:data,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{color:c.line,width:2},itemStyle:{color:c.line},areaStyle:{color:c.line,opacity:0.12}}]
     });
 
     var el2=document.getElementById('bar-chart');
@@ -197,13 +202,13 @@ body { background:var(--color-base-100); color:var(--color-base-content); font-f
       backgroundColor:'transparent',
       grid:{left:42,right:16,top:30,bottom:24},
       legend:{textStyle:{color:c.text,fontSize:11},itemWidth:10,itemHeight:10,top:0,right:0},
-      tooltip:{trigger:'axis',backgroundColor:'rgba(20,20,20,0.92)',borderWidth:0,textStyle:{color:'#fff',fontSize:12}},
+      tooltip:{trigger:'axis',backgroundColor:c.tooltipBg,borderWidth:0,textStyle:{color:c.tooltipText,fontSize:12}},
       xAxis:{type:'category',data:days,axisLine:{lineStyle:{color:c.grid}},axisLabel:{color:c.text,fontFamily:'JetBrains Mono,monospace',fontSize:10}},
       yAxis:{type:'value',axisLine:{show:false},splitLine:{lineStyle:{color:c.grid}},axisLabel:{color:c.text,fontFamily:'JetBrains Mono,monospace',fontSize:10,formatter:'${value}'}},
       series:[
         {name:'anthropic',type:'bar',stack:'p',data:[7.2,8.1,6.4,9.3,9.9,8.5,10.6,11.2,7.4,9.8,8.7,8.0,10.1,11.4],itemStyle:{color:c.line}},
-        {name:'openrouter',type:'bar',stack:'p',data:[0.8,1.1,1.2,0.9,1.0,1.2,1.5,1.4,1.3,1.7,1.6,1.4,1.7,1.9],itemStyle:{color:c.purple}},
-        {name:'ollama',type:'bar',stack:'p',data:[0.21,0.20,0.23,0.30,0.32,0.25,0.31,0.45,0.22,0.37,0.31,0.30,0.50,0.82],itemStyle:{color:c.sage}}
+        {name:'openrouter',type:'bar',stack:'p',data:[0.8,1.1,1.2,0.9,1.0,1.2,1.5,1.4,1.3,1.7,1.6,1.4,1.7,1.9],itemStyle:{color:c.info}},
+        {name:'ollama',type:'bar',stack:'p',data:[0.21,0.20,0.23,0.30,0.32,0.25,0.31,0.45,0.22,0.37,0.31,0.30,0.50,0.82],itemStyle:{color:c.success}}
       ]
     });
   }

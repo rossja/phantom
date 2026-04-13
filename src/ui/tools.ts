@@ -4,6 +4,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { publish } from "./events.ts";
+import { escapeHtml } from "./html.ts";
 import { agentNameInitial, capitalizeAgentName } from "./name.ts";
 import { getPublicDir } from "./serve.ts";
 import { createSession } from "./session.ts";
@@ -131,14 +132,22 @@ export function wrapInBaseTemplate(title: string, content: string, agentName: st
 		return generateFallbackPage(title, content, date, timestamp, displayName);
 	}
 
-	return template
-		.replace(/\{\{TITLE\}\}/g, escapeHtml(title))
-		.replace(/\{\{DATE\}\}/g, date)
-		.replace(/\{\{TIMESTAMP\}\}/g, timestamp)
-		.replace(/\{\{AGENT_NAME\}\}/g, escapeHtml(agentName))
-		.replace(/\{\{AGENT_NAME_CAPITALIZED\}\}/g, escapeHtml(displayName))
-		.replace(/\{\{AGENT_NAME_INITIAL\}\}/g, escapeHtml(initial))
-		.replace("<!-- Agent writes content here -->", content);
+	// Single-pass substitution avoids re-scanning substituted values (second-order
+	// injection) and the final split/join for the content marker sidesteps the
+	// String.replace dollar-pattern trap ($&, $`, $', $$) that would otherwise
+	// corrupt agent-authored content containing those sequences.
+	const substitutions: Record<string, string> = {
+		"{{TITLE}}": escapeHtml(title),
+		"{{DATE}}": date,
+		"{{TIMESTAMP}}": timestamp,
+		"{{AGENT_NAME_CAPITALIZED}}": escapeHtml(displayName),
+		"{{AGENT_NAME_INITIAL}}": escapeHtml(initial),
+	};
+	const withPlaceholders = template.replace(
+		/\{\{(TITLE|DATE|TIMESTAMP|AGENT_NAME_CAPITALIZED|AGENT_NAME_INITIAL)\}\}/g,
+		(match) => substitutions[match] ?? match,
+	);
+	return withPlaceholders.split("<!-- Agent writes content here -->").join(content);
 }
 
 function generateFallbackPage(
@@ -208,8 +217,4 @@ function generateFallbackPage(
   </footer>
 </body>
 </html>`;
-}
-
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
