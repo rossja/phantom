@@ -205,16 +205,6 @@
 				title: "Memory explorer",
 				body: "A read view over every episode, fact, and procedure the agent has consolidated. Search, filter by decay, inspect provenance, and watch memories get reinforced as they get reused.",
 			},
-			settings: {
-				eyebrow: "soon",
-				title: "Settings",
-				body: "A curated form over the agent's Claude Code settings: permissions, MCP servers, hooks, and the knobs that actually change how it thinks. Raw JSON escape hatch for the power users.",
-			},
-			hooks: {
-				eyebrow: "soon",
-				title: "Hooks",
-				body: "A visual rule builder for the 26 Claude Agent SDK hook events: command, prompt, agent, and http hooks with matchers and per-event lists. Trust modal on first install, audit log on every change.",
-			},
 		};
 		var meta = labels[name] || { eyebrow: "Soon", title: name, body: "Coming in a later PR." };
 		container.innerHTML = (
@@ -251,8 +241,8 @@
 		var name = parsed.route;
 		deactivateAllRoutes();
 
-		var liveRoutes = ["skills", "memory-files", "plugins", "subagents", "hooks"];
-		var comingSoon = ["sessions", "cost", "scheduler", "evolution", "memory", "settings"];
+		var liveRoutes = ["skills", "memory-files", "plugins", "subagents", "hooks", "settings"];
+		var comingSoon = ["sessions", "cost", "scheduler", "evolution", "memory"];
 
 		if (liveRoutes.indexOf(name) >= 0 && routes[name]) {
 			var containerId = "route-" + name;

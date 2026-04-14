@@ -37,8 +37,9 @@ describe("runMigrations", () => {
 		const migrationCount = db.query("SELECT COUNT(*) as count FROM _migrations").get() as { count: number };
 		// PR3 adds three audit tables and their indices: subagent_audit_log
 		// (commit 3), hook_audit_log (commit 4), and settings_audit_log
-		// (commit 5). Each adds 2 migration steps (table + index).
-		expect(migrationCount.count).toBe(20);
+		// (commit 5). Each adds 2 migration steps (table + index), bringing
+		// the total from the PR2 baseline of 16 up to 22.
+		expect(migrationCount.count).toBe(22);
 	});
 
 	test("tracks applied migration indices", () => {
@@ -50,8 +51,6 @@ describe("runMigrations", () => {
 			.all()
 			.map((r) => (r as { index_num: number }).index_num);
 
-		expect(indices).toEqual([
-			0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-		]);
+		expect(indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
 	});
 });

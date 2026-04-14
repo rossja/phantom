@@ -186,4 +186,19 @@ export const MIGRATIONS: string[] = [
 	)`,
 
 	"CREATE INDEX IF NOT EXISTS idx_hook_audit_log_created ON hook_audit_log(id DESC)",
+
+	// PR3 dashboard: curated settings audit log. One row per dirty field per
+	// save captures the key, previous JSON value, and new JSON value so a
+	// human can diff and recover. Agent-originated Write tool edits to
+	// settings.json bypass this path.
+	`CREATE TABLE IF NOT EXISTS settings_audit_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		field TEXT NOT NULL,
+		previous_value TEXT,
+		new_value TEXT,
+		actor TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
+
+	"CREATE INDEX IF NOT EXISTS idx_settings_audit_log_field ON settings_audit_log(field, id DESC)",
 ];
