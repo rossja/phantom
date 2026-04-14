@@ -7,8 +7,17 @@ import type { ConstitutionChecker } from "./constitution.ts";
 import { runConstitutionJudge } from "./judges/constitution-judge.ts";
 import { runRegressionJudge } from "./judges/regression-judge.ts";
 import { runSafetyJudge } from "./judges/safety-judge.ts";
-import type { JudgeCosts } from "./judges/types.ts";
+import type { JudgeCostEntry, JudgeCosts } from "./judges/types.ts";
 import { emptyJudgeCosts } from "./judges/types.ts";
+
+/**
+ * Judge gate categories that accumulate subprocess cost.
+ * Mirrors the keys on `JudgeCosts` for the three wrapper-level catches in
+ * `validateAllWithJudges`. Kept as a union rather than a plain string so
+ * `recordJudgeFailure` cannot silently route partial cost into the wrong
+ * bucket.
+ */
+export type JudgeGateCategory = "constitution_gate" | "regression_gate" | "safety_gate";
 import type { ConfigDelta, EvolvedConfig, GateResult, GoldenCase, ValidationResult } from "./types.ts";
 
 /**
@@ -317,16 +326,51 @@ export async function validateAllWithJudges(
 	const results: ValidationResult[] = [];
 	let failureCount = 0;
 
-	const recordJudgeFailure = (error: unknown): string => {
+	/**
+	 * Record a judge subprocess failure, accumulate its partial cost into the
+	 * corresponding `judgeCosts[gate]` bucket, and return the error message.
+	 *
+	 * IMPORTANT: `failureCount` is a wrapper-level counter. One increment here
+	 * corresponds to ONE rejected `Promise<unknown>` from a judge wrapper
+	 * (`runConstitutionJudge`, `runRegressionJudge`, `runSafetyJudge`), not
+	 * one dead subprocess. Inside each wrapper:
+	 *   - `runConstitutionJudge` and `runSafetyJudge` spawn 3 parallel
+	 *     subprocess calls via `multiJudge` + `Promise.all`.
+	 *   - `runRegressionJudge` spawns `goldenSuite.length` parallel Haiku
+	 *     subprocesses plus conditional Sonnet escalations.
+	 *
+	 * `Promise.all` rejects as soon as the first sibling rejects, but it does
+	 * NOT cancel already-in-flight siblings: they continue running on the host
+	 * until they complete or are reaped by the OS. That means reaching
+	 * `MAX_JUDGE_FAILURES_PER_CYCLE = 2` wrapper failures can coincide with up
+	 * to `2 * 3` constitution subprocesses plus `2 * 3` safety subprocesses
+	 * plus `2 * N` regression subprocesses (for an N-case golden suite)
+	 * already spawned. The ceiling bounds sequential spawn and keeps the NEXT
+	 * wrapper call in the current cycle from firing, but it is NOT a cap on
+	 * intra-wrapper parallelism. Operators sizing cgroups should plan for the
+	 * full fan-out, not for 2 subprocesses.
+	 *
+	 * Phase 3 will delete `multiJudge` as part of the 6-to-2 judge rewrite,
+	 * at which point this comment becomes historical context.
+	 *
+	 * Cost note: for a pure SIGKILL before the `result` frame arrives,
+	 * `partialCost.costUsd` is typically 0 because `absorbUsage` in
+	 * `judge-query.ts` only writes tokens, not dollars. Input/output tokens
+	 * still flow through and are the useful signal here. Full dollar-cost
+	 * recovery on SIGKILL is a Phase 1 cost_events item.
+	 */
+	const recordJudgeFailure = (error: unknown, gate: JudgeGateCategory): string => {
 		failureCount++;
 		const msg = error instanceof Error ? error.message : String(error);
-		// Log partial cost separately so fork-bomb-era SIGKILL spend is visible
-		// in the process log even if it never lands in metrics.json.
 		if (error instanceof JudgeSubprocessError) {
 			const p = error.partialCost;
+			const bucket: JudgeCostEntry = judgeCosts[gate];
+			bucket.calls += 1;
+			bucket.totalInputTokens += p.inputTokens;
+			bucket.totalOutputTokens += p.outputTokens;
+			bucket.totalUsd += p.costUsd;
 			console.warn(
-				`[evolution] judge subprocess died mid-flight: ${msg} ` +
-					`(partial: in=${p.inputTokens} out=${p.outputTokens} cost=$${p.costUsd.toFixed(4)} model=${p.model})`,
+				`[evolution] judge subprocess died mid-flight (${gate}): ${msg} (partial: in=${p.inputTokens} out=${p.outputTokens} cost=$${p.costUsd.toFixed(4)} model=${p.model}; cost may read as zero under SIGKILL because the SDK only emits cost in the result frame, tokens are still valid)`,
 			);
 		}
 		return msg;
@@ -352,7 +396,7 @@ export async function validateAllWithJudges(
 			}
 		} catch (error: unknown) {
 			// Fail-closed: reject on error
-			const msg = recordJudgeFailure(error);
+			const msg = recordJudgeFailure(error, "constitution_gate");
 			console.warn(`[evolution] Constitution judge failed, failing closed: ${msg}`);
 			gates.push({ gate: "constitution", passed: false, reason: `Judge error (fail-closed): ${msg}` });
 			if (failureCount >= MAX_JUDGE_FAILURES_PER_CYCLE) {
@@ -377,7 +421,7 @@ export async function validateAllWithJudges(
 			judgeCosts.regression_gate.calls++;
 			judgeCosts.regression_gate.totalUsd += regressionResult.costUsd;
 		} catch (error: unknown) {
-			const msg = recordJudgeFailure(error);
+			const msg = recordJudgeFailure(error, "regression_gate");
 			console.warn(`[evolution] Regression judge failed, falling back to heuristic: ${msg}`);
 			gates.push(regressionGate(delta, goldenSuite));
 			if (failureCount >= MAX_JUDGE_FAILURES_PER_CYCLE) {
@@ -413,7 +457,7 @@ export async function validateAllWithJudges(
 			}
 		} catch (error: unknown) {
 			// Fail-closed: reject on error
-			const msg = recordJudgeFailure(error);
+			const msg = recordJudgeFailure(error, "safety_gate");
 			console.warn(`[evolution] Safety judge failed, failing closed: ${msg}`);
 			gates.push({ gate: "safety", passed: false, reason: `Judge error (fail-closed): ${msg}` });
 			if (failureCount >= MAX_JUDGE_FAILURES_PER_CYCLE) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { JudgeSubprocessError } from "../../agent/judge-query.ts";
 import type { AgentRuntime } from "../../agent/runtime.ts";
 import type { PhantomConfig } from "../../config/types.ts";
@@ -267,6 +267,132 @@ describe("Phase 0 mutex guard", () => {
 		await engine.afterSession(makeSession({ session_id: "sess-2" }));
 		expect((engine as unknown as { activeCycle: unknown }).activeCycle).toBeNull();
 	});
+
+	test("mutex is cleared after runCycle rejects with an uncaught error", async () => {
+		// The prior test name advertises coverage for the thrown-cycle path but
+		// the body never exercises it: every error inside the default runCycle
+		// is caught by a fallback before it propagates. This test forces an
+		// uncaught throw by monkey-patching `runCycle` on the instance and
+		// verifies that the `finally` in `afterSession` still clears the mutex.
+		const runtime: FakeRuntimeShape = {
+			getPhantomConfig: fakePhantomConfig,
+			judgeQuery: async () => {
+				throw new Error("unused in this test");
+			},
+		};
+		const engine = new EvolutionEngine(CONFIG_PATH, runtime as unknown as AgentRuntime);
+		(engine as unknown as { llmJudgesEnabled: boolean }).llmJudgesEnabled = true;
+
+		// Replace the private runCycle on the instance so the engine's outer
+		// `afterSession` actually sees an uncaught rejection. This is the path
+		// the reviewer flagged as untested.
+		(engine as unknown as { runCycle: (s: SessionSummary) => Promise<never> }).runCycle = async () => {
+			throw new Error("synthetic runCycle failure");
+		};
+
+		let rejected = false;
+		try {
+			await engine.afterSession(makeSession({ session_id: "sess-throw" }));
+		} catch (err: unknown) {
+			rejected = true;
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).message).toBe("synthetic runCycle failure");
+		}
+		expect(rejected).toBe(true);
+		expect((engine as unknown as { activeCycle: unknown }).activeCycle).toBeNull();
+		expect((engine as unknown as { activeCycleSessionId: string | null }).activeCycleSessionId).toBeNull();
+	});
+
+	test("mutex skip path logs the active session id and a running skip count", async () => {
+		// M5: the log line must name the cycle that is blocking (so operators
+		// can pair the skip to its cause) and include a running skip counter
+		// (so a tight burst is visible as a climbing number, not a repeated
+		// one-liner). The counter must reset to zero when the active cycle
+		// finishes.
+		const logs: string[] = [];
+		const origLog = console.log;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((a) => String(a)).join(" "));
+		};
+		try {
+			type Releaser = (reason: unknown) => void;
+			const releaseHangRef: { fn: Releaser | null } = { fn: null };
+			const hang = new Promise<never>((_resolve, reject) => {
+				releaseHangRef.fn = reject;
+			});
+			const runtime: FakeRuntimeShape = {
+				getPhantomConfig: fakePhantomConfig,
+				judgeQuery: async () => hang,
+			};
+			const engine = new EvolutionEngine(CONFIG_PATH, runtime as unknown as AgentRuntime);
+			(engine as unknown as { llmJudgesEnabled: boolean }).llmJudgesEnabled = true;
+
+			const callA = engine.afterSession(makeSession({ session_id: "active-xyz" }));
+			await Promise.resolve();
+			await Promise.resolve();
+			await engine.afterSession(makeSession({ session_id: "skipped-1" }));
+			await engine.afterSession(makeSession({ session_id: "skipped-2" }));
+
+			const skipLines = logs.filter((l) => l.includes("cycle already in progress"));
+			expect(skipLines.length).toBe(2);
+			expect(skipLines[0]).toContain("active=active-xyz");
+			expect(skipLines[0]).toContain("skips=1");
+			expect(skipLines[0]).toContain("skipping session skipped-1");
+			expect(skipLines[1]).toContain("skips=2");
+			expect(skipLines[1]).toContain("skipping session skipped-2");
+
+			expect((engine as unknown as { activeCycleSkipCount: number }).activeCycleSkipCount).toBe(2);
+
+			releaseHangRef.fn?.(new Error("released by test"));
+			try {
+				await callA;
+			} catch {
+				// expected
+			}
+			expect((engine as unknown as { activeCycleSkipCount: number }).activeCycleSkipCount).toBe(0);
+			expect((engine as unknown as { activeCycleSessionId: string | null }).activeCycleSessionId).toBeNull();
+		} finally {
+			console.log = origLog;
+		}
+	});
+
+	test("mutex skip path still bumps session_count so dashboards do not undercount", async () => {
+		// M4: without this the normal-vs-skip paths diverge and operators
+		// watching session_count in the dashboard see undercounting during
+		// bursts. The skip path now updates session metrics with
+		// hadCorrections=false at the top of afterSession.
+		type Releaser = (reason: unknown) => void;
+		const releaseHangRef: { fn: Releaser | null } = { fn: null };
+		const hang = new Promise<never>((_resolve, reject) => {
+			releaseHangRef.fn = reject;
+		});
+		const runtime: FakeRuntimeShape = {
+			getPhantomConfig: fakePhantomConfig,
+			judgeQuery: async () => hang,
+		};
+		const engine = new EvolutionEngine(CONFIG_PATH, runtime as unknown as AgentRuntime);
+		(engine as unknown as { llmJudgesEnabled: boolean }).llmJudgesEnabled = true;
+
+		const callA = engine.afterSession(makeSession({ session_id: "active" }));
+		await Promise.resolve();
+		await Promise.resolve();
+		await engine.afterSession(makeSession({ session_id: "skip-1" }));
+		await engine.afterSession(makeSession({ session_id: "skip-2" }));
+
+		const metricsPath = `${TEST_DIR}/phantom-config/meta/metrics.json`;
+		const metrics = JSON.parse(readFileSync(metricsPath, "utf-8"));
+		// Three afterSession calls, three counter increments from the top-of-
+		// afterSession update. The active call is still hanging so its inner
+		// updateAfterSession has not run yet, so we assert exactly 3.
+		expect(metrics.session_count).toBe(3);
+
+		releaseHangRef.fn?.(new Error("released by test"));
+		try {
+			await callA;
+		} catch {
+			// expected
+		}
+	});
 });
 
 describe("Phase 0 cycle-local failure ceiling", () => {
@@ -363,6 +489,175 @@ describe("Phase 0 cycle-local failure ceiling", () => {
 		// This guards against a future edit that silently relaxes the ceiling.
 		// Two failures is the operational floor the Phase 0 brief mandates.
 		expect(MAX_JUDGE_FAILURES_PER_CYCLE).toBe(2);
+	});
+
+	test("partial judge costs accumulate from JudgeSubprocessError.partialCost into judgeCosts", async () => {
+		// C2: recordJudgeFailure used to log partial cost to stdout but never
+		// route it into `judgeCosts[gate]`, so the daily cost cap never saw
+		// SIGKILL-era dead spend. This test forces two subprocess failures,
+		// catches the CycleAborted, and asserts that the constitution_gate
+		// bucket on `partialJudgeCosts` has positive tokens and a call count.
+		const evolutionConfig = {
+			cadence: {
+				reflection_interval: 1,
+				consolidation_interval: 10,
+				full_review_interval: 50,
+				drift_check_interval: 20,
+			},
+			gates: { drift_threshold: 0.7, max_file_lines: 200, auto_rollback_threshold: 0.1, auto_rollback_window: 5 },
+			reflection: { model: "claude-sonnet-4-20250514", effort: "high" as const, max_budget_usd: 0.5 },
+			judges: { enabled: "always" as const, cost_cap_usd_per_day: 50.0, max_golden_suite_size: 50 },
+			paths: {
+				config_dir: `${TEST_DIR}/phantom-config`,
+				constitution: `${TEST_DIR}/phantom-config/constitution.md`,
+				version_file: `${TEST_DIR}/phantom-config/meta/version.json`,
+				metrics_file: `${TEST_DIR}/phantom-config/meta/metrics.json`,
+				evolution_log: `${TEST_DIR}/phantom-config/meta/evolution-log.jsonl`,
+				golden_suite: `${TEST_DIR}/phantom-config/meta/golden-suite.jsonl`,
+				session_log: `${TEST_DIR}/phantom-config/memory/session-log.jsonl`,
+			},
+		};
+		const checker = new ConstitutionChecker(evolutionConfig);
+
+		const runtime: FakeRuntimeShape = {
+			getPhantomConfig: fakePhantomConfig,
+			judgeQuery: async () => {
+				throw new JudgeSubprocessError("simulated subprocess SIGKILL", {
+					inputTokens: 2048,
+					outputTokens: 128,
+					costUsd: 0,
+					model: "claude-sonnet",
+					durationMs: 42,
+				});
+			},
+		};
+
+		let aborted: CycleAborted | null = null;
+		try {
+			await validateAllWithJudges(
+				runtime as unknown as AgentRuntime,
+				[makeDelta({ content: "- delta 1" }), makeDelta({ content: "- delta 2" })],
+				checker,
+				[],
+				evolutionConfig,
+				makeEvolvedConfig(),
+			);
+		} catch (err: unknown) {
+			if (err instanceof CycleAborted) aborted = err;
+		}
+
+		expect(aborted).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: asserted above
+		const a = aborted!;
+		expect(a.partialJudgeCosts.constitution_gate.calls).toBeGreaterThanOrEqual(1);
+		expect(a.partialJudgeCosts.constitution_gate.totalInputTokens).toBeGreaterThan(0);
+		// Output tokens and dollar cost may also flow through when the error
+		// carries non-zero values, which this simulated SIGKILL does.
+		expect(a.partialJudgeCosts.constitution_gate.totalOutputTokens).toBeGreaterThan(0);
+	});
+
+	test("engine CycleAborted catch applies partial results end-to-end instead of dropping them", async () => {
+		// C3: the old engine.ts CycleAborted catch short-circuited to
+		// `skippedResult()` and discarded `error.partialResults`. This test
+		// drives the full engine path with a fake runtime whose judgeQuery
+		// returns a pass verdict for delta 1's constitution and safety
+		// gates, then throws JudgeSubprocessError on delta 2's gates. The
+		// net effect is CycleAborted carrying delta 1 already approved; the
+		// engine's catch branch must call applyApproved over the partial
+		// result, bump the version, and return changes_applied.length >= 1.
+		let deltaIndex = 0;
+		let constitutionCallsForCurrentDelta = 0;
+		let safetyCallsForCurrentDelta = 0;
+
+		// Pass-verdict payload the minority-veto multiJudge strategy treats
+		// as "all judges passed".
+		const passVerdict = {
+			verdict: "pass" as const,
+			confidence: 0.95,
+			reasoning: "no issues",
+			data: { verdict: "pass", confidence: 0.95, reasoning: "no issues" },
+			model: "claude-sonnet",
+			inputTokens: 100,
+			outputTokens: 20,
+			costUsd: 0.001,
+			durationMs: 5,
+		};
+
+		const runtime: FakeRuntimeShape = {
+			getPhantomConfig: fakePhantomConfig,
+			judgeQuery: async (options: { systemPrompt?: string }) => {
+				const sys = options.systemPrompt ?? "";
+				// The constitution judge prompt starts with "constitutional
+				// compliance auditor"; the safety judge prompt starts with
+				// "safety auditor". Any other prompt (observation extraction,
+				// regression, quality) returns a pass verdict so the engine
+				// reaches the validation loop cleanly.
+				const isConstitution = sys.includes("constitutional compliance auditor");
+				const isSafety = sys.includes("safety auditor");
+
+				if (!isConstitution && !isSafety) {
+					return passVerdict;
+				}
+
+				// Each gate spawns 3 parallel judgeQuery calls via multiJudge.
+				// Delta 1 passes cleanly through constitution and safety.
+				// When delta 2's constitution gate fires, throw: the Promise.all
+				// rejects, the catch block bumps failureCount to 1, pushes a
+				// fail gate, then calls the safety gate which also throws,
+				// pushing failureCount to 2 and raising CycleAborted.
+				if (isConstitution) {
+					constitutionCallsForCurrentDelta++;
+					if (deltaIndex === 0) return passVerdict;
+					throw new JudgeSubprocessError("simulated SIGKILL on delta 2 constitution", {
+						inputTokens: 500,
+						outputTokens: 0,
+						costUsd: 0,
+						model: "claude-sonnet",
+						durationMs: 10,
+					});
+				}
+				// Safety path
+				safetyCallsForCurrentDelta++;
+				if (deltaIndex === 0) {
+					if (safetyCallsForCurrentDelta === 3) {
+						deltaIndex = 1;
+						constitutionCallsForCurrentDelta = 0;
+						safetyCallsForCurrentDelta = 0;
+					}
+					return passVerdict;
+				}
+				throw new JudgeSubprocessError("simulated SIGKILL on delta 2 safety", {
+					inputTokens: 500,
+					outputTokens: 0,
+					costUsd: 0,
+					model: "claude-sonnet",
+					durationMs: 10,
+				});
+			},
+		};
+
+		const engine = new EvolutionEngine(CONFIG_PATH, runtime as unknown as AgentRuntime);
+		(engine as unknown as { llmJudgesEnabled: boolean }).llmJudgesEnabled = true;
+
+		// A correction session produces deltas via the heuristic fallback
+		// in the reflection step. With two distinct corrections, generateDeltas
+		// yields at least two deltas, so the validation loop touches delta 2
+		// and triggers the cascade described above.
+		const session = makeSession({
+			session_id: "c3-integration",
+			user_messages: ["No, always use TypeScript not JavaScript", "I prefer using Vim keybindings in all editors"],
+		});
+		const result = await engine.afterSession(session);
+
+		// The engine should NOT short-circuit to skippedResult: delta 1 was
+		// fully validated and approved before delta 2 blew up, so the engine
+		// is obligated to apply it, bump the version, and report a non-empty
+		// changes_applied.
+		expect(result.changes_applied.length).toBeGreaterThanOrEqual(1);
+		// The version must advance on partial apply; this is the regression
+		// the reviewer feared: "session that had 3 approved deltas returns
+		// as if nothing happened and version is not bumped."
+		expect(result.version).toBeGreaterThan(0);
 	});
 });
 

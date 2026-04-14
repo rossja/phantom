@@ -266,6 +266,48 @@ export async function runJudgeQuery<T>(
 	};
 }
 
+/**
+ * Test-only: absorb a stream of fake SDK messages into a `JudgePartialCost`
+ * using exactly the same narrowing rules as `runJudgeQuery`. Exposed so the
+ * partial-cost absorber can be exercised without spawning a real subprocess.
+ * Do NOT use in production code: `runJudgeQuery` is the only call site the
+ * runtime uses, and this helper is just a slice of its internal state machine.
+ */
+export function __absorbUsageForTest(
+	messages: Iterable<unknown>,
+	initial?: Partial<JudgePartialCost>,
+): JudgePartialCost {
+	const partial: JudgePartialCost = {
+		inputTokens: 0,
+		outputTokens: 0,
+		costUsd: 0,
+		model: "test",
+		durationMs: 0,
+		...initial,
+	};
+	const absorb = (usage: unknown): void => {
+		if (!usage || typeof usage !== "object") return;
+		const u = usage as { input_tokens?: number; output_tokens?: number };
+		if (typeof u.input_tokens === "number") partial.inputTokens += u.input_tokens;
+		if (typeof u.output_tokens === "number") partial.outputTokens += u.output_tokens;
+	};
+	for (const message of messages) {
+		const m = message as { type?: string; message?: { usage?: unknown }; usage?: unknown };
+		if (m.type === "assistant") {
+			if (m.message?.usage) absorb(m.message.usage);
+			continue;
+		}
+		if (m.type === "result") {
+			// Production path reads cumulative numbers from the result frame; the
+			// absorber is only the pre-result bookkeeper so we do not double count
+			// here. This matches the `case "result"` branch in runJudgeQuery.
+			continue;
+		}
+		if (m.usage) absorb(m.usage);
+	}
+	return partial;
+}
+
 function buildJudgePrompt(systemPrompt: string, schemaJson: unknown): string {
 	return [
 		systemPrompt,
