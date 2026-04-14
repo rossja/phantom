@@ -51,10 +51,19 @@ export type SeedResult = {
 	created: boolean;
 };
 
+export type SeedOptions = {
+	// When true, compute the would-add and would-skip sets but do NOT write
+	// settings.json. Used by the CLI dry-run path so operators can preview the
+	// effect of `bun run src/plugins/seed.ts` before they pass --apply.
+	dryRun?: boolean;
+};
+
 export function seedDefaultPlugins(
 	picks: ReadonlyArray<PluginPick>,
 	settingsPath: string = getUserSettingsPath(),
+	options: SeedOptions = {},
 ): SeedResult {
+	const dryRun = options.dryRun === true;
 	const created = !existsSync(settingsPath);
 	const read = readSettings(settingsPath);
 	if (!read.ok) {
@@ -80,6 +89,12 @@ export function seedDefaultPlugins(
 		return { added, skipped, created: false };
 	}
 
+	if (dryRun) {
+		// Report what would change, but never touch the file. The "created"
+		// flag still reports the would-have-created state for an honest preview.
+		return { added, skipped, created };
+	}
+
 	settings.enabledPlugins = enabled as typeof settings.enabledPlugins;
 	const write = writeSettings(settings, settingsPath);
 	if (!write.ok) {
@@ -101,17 +116,20 @@ function main(): void {
 		);
 		return;
 	}
-	if (!args.includes("--apply")) {
-		process.stdout.write("[seed] Dry run mode (use --apply to write).\n");
+	const dryRun = !args.includes("--apply");
+	if (dryRun) {
+		process.stdout.write("[seed] Dry run mode (use --apply to write). No changes will be made.\n");
 	}
 	try {
-		const result = seedDefaultPlugins(DEFAULT_PLUGIN_PICKS);
+		const result = seedDefaultPlugins(DEFAULT_PLUGIN_PICKS, getUserSettingsPath(), { dryRun });
+		const verb = dryRun ? "Would add" : "Added";
+		const skipVerb = dryRun ? "Would preserve" : "Preserved";
 		if (result.added.length > 0) {
-			process.stdout.write(`[seed] Added ${result.added.length} default plugin(s): ${result.added.join(", ")}\n`);
+			process.stdout.write(`[seed] ${verb} ${result.added.length} default plugin(s): ${result.added.join(", ")}\n`);
 		}
 		if (result.skipped.length > 0) {
 			process.stdout.write(
-				`[seed] Preserved ${result.skipped.length} existing plugin(s): ${result.skipped.join(", ")}\n`,
+				`[seed] ${skipVerb} ${result.skipped.length} existing plugin(s): ${result.skipped.join(", ")}\n`,
 			);
 		}
 		if (result.added.length === 0 && result.skipped.length === 0) {

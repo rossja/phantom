@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PLUGIN_PICKS, seedDefaultPlugins } from "../seed.ts";
@@ -87,5 +87,30 @@ describe("seedDefaultPlugins", () => {
 		expect(names).toContain("notion");
 		expect(names).toContain("slack");
 		expect(names).toContain("claude-md-management");
+	});
+
+	test("dryRun computes the would-add set without writing settings.json", () => {
+		// File does not exist yet. Dry run should report would-add but never create.
+		expect(existsSync(settingsPath)).toBe(false);
+		const result = seedDefaultPlugins(DEFAULT_PLUGIN_PICKS, settingsPath, { dryRun: true });
+		expect(result.added).toHaveLength(4);
+		expect(result.skipped).toHaveLength(0);
+		expect(existsSync(settingsPath)).toBe(false);
+	});
+
+	test("dryRun on an existing settings.json does not mutate the file", () => {
+		const original = JSON.stringify({
+			enabledPlugins: {
+				"linear@claude-plugins-official": false,
+				"my-custom@my-marketplace": true,
+			},
+			model: "claude-opus-4-6",
+		});
+		writeFileSync(settingsPath, original);
+		const result = seedDefaultPlugins(DEFAULT_PLUGIN_PICKS, settingsPath, { dryRun: true });
+		expect(result.added).toHaveLength(3); // notion, slack, claude-md-management
+		expect(result.skipped).toContain("linear@claude-plugins-official");
+		const onDisk = readFileSync(settingsPath, "utf-8");
+		expect(onDisk).toBe(original); // byte-for-byte identical
 	});
 });

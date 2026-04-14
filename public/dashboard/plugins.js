@@ -203,11 +203,18 @@
 
 	function render() {
 		root.innerHTML = renderHeader() + renderFilters() + '<div id="plugins-grid-wrap">' + renderGrid() + '</div>';
-		wireEvents();
+		// Persistent listeners (header, search, tabs, category chips) bind once
+		// per render. Grid listeners (install, uninstall, history) re-bind on
+		// every rerenderGrid because the cards get replaced. Keeping them split
+		// prevents the quadratic listener leak that fires when the user types
+		// in the search box, since rerenderGrid only touches grid-internal
+		// elements and never re-attaches listeners on persistent controls.
+		wirePersistentEvents();
+		wireGridEvents();
 		ctx.setBreadcrumb("Plugins");
 	}
 
-	function wireEvents() {
+	function wirePersistentEvents() {
 		var refresh = document.getElementById("plugins-refresh-btn");
 		if (refresh) refresh.addEventListener("click", function () { loadCatalog(true); });
 		var find = document.getElementById("plugins-find-btn");
@@ -235,7 +242,9 @@
 				render();
 			});
 		});
+	}
 
+	function wireGridEvents() {
 		Array.prototype.forEach.call(document.querySelectorAll("[data-install]"), function (btn) {
 			btn.addEventListener("click", function () {
 				openInstallModal(btn.getAttribute("data-install"));
@@ -259,7 +268,7 @@
 		var wrap = document.getElementById("plugins-grid-wrap");
 		if (!wrap) return;
 		wrap.innerHTML = renderGrid();
-		wireEvents();
+		wireGridEvents();
 	}
 
 	function findPlugin(name) {
