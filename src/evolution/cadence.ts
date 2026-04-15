@@ -166,26 +166,46 @@ export class EvolutionCadence {
 		);
 		const result = await processBatch(queued, this.engine);
 
-		// Only delete rows whose pipeline succeeded. Failed rows stay in the
-		// queue so the next drain retries them; deleting on failure would
-		// silently drop the exact sessions the safety floor exists to protect
-		// (transient judge subprocess errors, network blips, CycleAborted from
-		// the Phase 0 failure ceiling). A future PR will add a `failure_count`
-		// column and a poison-pill ceiling so a single bad row cannot loop
-		// forever, but the dedup-by-session_key on enqueue already bounds the
-		// loss for repeated sessions.
+		// Phase 3 queue disposition (switch on the explicit enum carried by
+		// every batch entry):
+		//  - ok / skip:         delete from queue via markProcessed.
+		//  - invariant_failed:  increment retry_count via markFailed; graduates
+		//                       to the poison pile at count >= 3.
+		//  - transient:         leave in place so the next drain retries them
+		//                       without a retry_count bump.
 		const okIds: number[] = [];
+		const failedIds: number[] = [];
+		const failedReasons: Record<number, string> = {};
 		for (const entry of result.results) {
-			if (entry.ok) {
-				okIds.push(entry.id);
-			} else {
-				console.warn(`[evolution] queue row id=${entry.id} pipeline failed, leaving in queue: ${entry.error}`);
+			switch (entry.disposition) {
+				case "ok":
+				case "skip":
+					okIds.push(entry.id);
+					break;
+				case "invariant_failed":
+					failedIds.push(entry.id);
+					failedReasons[entry.id] = entry.error ?? "invariant hard fail";
+					break;
+				case "transient":
+					console.warn(
+						`[evolution] queue row id=${entry.id} transient failure, leaving in queue: ${entry.error ?? "unknown"}`,
+					);
+					break;
 			}
 		}
 		this.queue.markProcessed(okIds);
+		if (failedIds.length > 0) {
+			const disposition = this.queue.markFailed(failedIds, failedReasons);
+			if (disposition.poisoned.length > 0) {
+				console.warn(`[evolution] rows poisoned after retry ceiling: ${disposition.poisoned.join(",")}`);
+			}
+			if (disposition.retried.length > 0) {
+				console.warn(`[evolution] rows left in queue with incremented retry_count: ${disposition.retried.join(",")}`);
+			}
+		}
 
 		const appliedCount = result.results.reduce((sum, r) => {
-			if (r.ok) return sum + r.result.changes_applied.length;
+			if (r.disposition === "ok" && r.result) return sum + r.result.changes.length;
 			return sum;
 		}, 0);
 		console.log(

@@ -1,24 +1,34 @@
 import type { EvolutionEngine } from "./engine.ts";
 import type { QueuedSession } from "./queue.ts";
-import type { EvolutionResult } from "./types.ts";
+import type { ReflectionSubprocessResult } from "./types.ts";
 
-// Phase 2 batch processor. This is a DELIBERATE TEMPORARY SEAM between the
-// cadence drain path and the existing 6-judge pipeline. Phase 3 will replace
-// the body of `processBatch` with a single reflection subprocess that reads
-// the whole batch and writes memory files directly. The Phase 2 body is
-// intentionally minimal so that replacement is as clean as possible:
+// Phase 3 batch processor. The Phase 2 per-session loop is gone: the
+// reflection subprocess runs once per drain against the full batch. The
+// signature stays compatible with cadence.ts so the downstream drain
+// handling continues to work without changes.
 //
-// - No strategy pattern.
-// - No configuration knobs.
-// - No abstractions that assume the Phase 3 shape.
-// - A thin wrapper that iterates the batch and calls the existing pipeline.
+// Each row carries an explicit `disposition` enum so the cadence routes
+// queue rows by name rather than by an implicit `ok` boolean derived from
+// an unrelated string field. The four dispositions are:
 //
-// If you find yourself adding indirection here, stop. The next builder agent
-// will delete the body of this function entirely.
+//   - "ok":               drain applied changes (or had nothing to write).
+//                         markProcessed deletes the rows.
+//   - "skip":             clean skip (subprocess returned status:"skip"
+//                         with no error). markProcessed deletes the rows.
+//   - "transient":        subprocess crashed, timed out, or threw. Rows
+//                         stay in the queue without a retry_count bump.
+//   - "invariant_failed": subprocess wrote something the invariant check
+//                         rolled back. markFailed bumps retry_count and
+//                         graduates rows to the poison pile at count >= 3.
 
-export type SessionBatchEntry =
-	| { id: number; ok: true; result: EvolutionResult }
-	| { id: number; ok: false; error: string };
+export type BatchDisposition = "ok" | "skip" | "transient" | "invariant_failed";
+
+export type SessionBatchEntry = {
+	id: number;
+	disposition: BatchDisposition;
+	error: string | null;
+	result: ReflectionSubprocessResult | null;
+};
 
 export type BatchResult = {
 	processed: number;
@@ -28,39 +38,69 @@ export type BatchResult = {
 	durationMs: number;
 };
 
-/**
- * Drain the queue rows and run the existing evolution pipeline per session.
- * Phase 0's mutex guards the engine so the cadence caller is responsible for
- * serialising batches; `processBatch` itself does not acquire the mutex.
- *
- * Partial failures continue through the batch: if the pipeline throws on one
- * session, we record the error and move to the next row. Phase 0's
- * `CycleAborted` catch inside `engine.afterSession` means each session's
- * failure mode is already bounded.
- */
+function isSuccessDisposition(disposition: BatchDisposition): boolean {
+	return disposition === "ok" || disposition === "skip";
+}
+
 export async function processBatch(queuedSessions: QueuedSession[], engine: EvolutionEngine): Promise<BatchResult> {
 	const startedAt = Date.now();
-	const results: SessionBatchEntry[] = [];
-	let successCount = 0;
-	let failureCount = 0;
-
-	for (const queued of queuedSessions) {
-		try {
-			const result = await engine.runSingleSessionPipeline(queued.session_summary);
-			results.push({ id: queued.id, ok: true, result });
-			successCount += 1;
-		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			results.push({ id: queued.id, ok: false, error: msg });
-			failureCount += 1;
-		}
+	if (queuedSessions.length === 0) {
+		return { processed: 0, successCount: 0, failureCount: 0, results: [], durationMs: 0 };
 	}
+
+	let result: ReflectionSubprocessResult;
+	try {
+		result = await engine.runDrainPipeline(queuedSessions);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		const results: SessionBatchEntry[] = queuedSessions.map((q) => ({
+			id: q.id,
+			disposition: "transient",
+			error: msg,
+			result: null,
+		}));
+		return {
+			processed: results.length,
+			successCount: 0,
+			failureCount: results.length,
+			results,
+			durationMs: Date.now() - startedAt,
+		};
+	}
+
+	const disposition = classifyDrain(result);
+	const success = isSuccessDisposition(disposition);
+	const results: SessionBatchEntry[] = queuedSessions.map((q) => ({
+		id: q.id,
+		disposition,
+		error: success ? null : (result.error ?? defaultErrorFor(disposition)),
+		result,
+	}));
 
 	return {
 		processed: results.length,
-		successCount,
-		failureCount,
+		successCount: success ? results.length : 0,
+		failureCount: success ? 0 : results.length,
 		results,
 		durationMs: Date.now() - startedAt,
 	};
+}
+
+function classifyDrain(result: ReflectionSubprocessResult): BatchDisposition {
+	if (result.invariantHardFailures.length > 0 || result.incrementRetryOnFailure) {
+		return "invariant_failed";
+	}
+	if (result.error) {
+		return "transient";
+	}
+	if (result.status === "skip") {
+		return "skip";
+	}
+	return "ok";
+}
+
+function defaultErrorFor(disposition: BatchDisposition): string {
+	if (disposition === "invariant_failed") return "invariant hard fail";
+	if (disposition === "transient") return "transient subprocess failure";
+	return "unknown";
 }

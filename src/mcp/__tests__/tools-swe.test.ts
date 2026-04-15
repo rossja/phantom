@@ -36,22 +36,18 @@ function createMockEvolution() {
 				toolPreferences: "Use grep before writing new code.",
 				errorRecovery: "Check CI logs first.",
 			},
-			meta: { version: 2, metricsSnapshot: { session_count: 10, success_rate_7d: 0.9, correction_rate_7d: 0.1 } },
+			meta: { version: 2, metricsSnapshot: { session_count: 10, success_rate_7d: 0.9 } },
 		}),
 		getMetrics: () => ({
 			session_count: 10,
 			success_count: 9,
 			failure_count: 1,
-			correction_count: 1,
 			evolution_count: 2,
-			rollback_count: 0,
 			last_session_at: new Date().toISOString(),
 			last_evolution_at: new Date().toISOString(),
 			success_rate_7d: 0.9,
-			correction_rate_7d: 0.1,
-			sessions_since_consolidation: 2,
 		}),
-		getVersionHistory: () => [],
+		getEvolutionLog: () => [],
 	};
 }
 
