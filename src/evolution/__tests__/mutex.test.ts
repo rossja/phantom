@@ -50,7 +50,7 @@ function setup(): void {
 			parent: null,
 			timestamp: "2026-03-25T00:00:00Z",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);

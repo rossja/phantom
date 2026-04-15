@@ -23,7 +23,7 @@ function setupTestEnvironment(): void {
 		CONFIG_PATH,
 		[
 			"reflection:",
-			'  enabled: "never"',
+			'  enabled: "always"',
 			"paths:",
 			`  config_dir: "${TEST_DIR}/phantom-config"`,
 			`  constitution: "${TEST_DIR}/phantom-config/constitution.md"`,
@@ -57,7 +57,7 @@ function setupTestEnvironment(): void {
 			parent: null,
 			timestamp: "2026-03-25T00:00:00Z",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);
@@ -67,12 +67,10 @@ function setupTestEnvironment(): void {
 			session_count: 0,
 			success_count: 0,
 			failure_count: 0,
-			correction_count: 0,
 			evolution_count: 0,
 			last_session_at: null,
 			last_evolution_at: null,
 			success_rate_7d: 0,
-			correction_rate_7d: 0,
 		}),
 		"utf-8",
 	);
@@ -221,5 +219,64 @@ describe("EvolutionEngine", () => {
 		const config = engine.getConfig();
 		expect(config.userProfile).toContain("TypeScript");
 		expect(config.meta.version).toBeGreaterThan(0);
+	});
+
+	test("reflection.enabled never short-circuits runDrainPipeline before spawn", async () => {
+		// CRIT-1 regression guard. With reflection.enabled:"never", the engine
+		// must NOT call the SDK runner. We override the config file in place
+		// so the constructor reads "never" instead of the default "always".
+		writeFileSync(
+			CONFIG_PATH,
+			[
+				"reflection:",
+				'  enabled: "never"',
+				"paths:",
+				`  config_dir: "${TEST_DIR}/phantom-config"`,
+				`  constitution: "${TEST_DIR}/phantom-config/constitution.md"`,
+				`  version_file: "${TEST_DIR}/phantom-config/meta/version.json"`,
+				`  metrics_file: "${TEST_DIR}/phantom-config/meta/metrics.json"`,
+				`  evolution_log: "${TEST_DIR}/phantom-config/meta/evolution-log.jsonl"`,
+				`  session_log: "${TEST_DIR}/phantom-config/memory/session-log.jsonl"`,
+			].join("\n"),
+			"utf-8",
+		);
+
+		let runnerCalls = 0;
+		const trackingRunner: QueryRunner = async () => {
+			runnerCalls += 1;
+			return {
+				responseText: '{"status":"ok"}',
+				costUsd: 0.001,
+				inputTokens: 0,
+				outputTokens: 0,
+				timedOut: false,
+				sigkilled: false,
+				error: null,
+			};
+		};
+		__setReflectionRunnerForTest(trackingRunner);
+
+		const engine = new EvolutionEngine(CONFIG_PATH);
+		const queued = {
+			id: 1,
+			session_id: "s1",
+			session_key: "cli:disabled",
+			gate_decision: { fire: true, source: "failsafe" as const, reason: "test", haiku_cost_usd: 0 },
+			session_summary: makeSession({ session_id: "s1", session_key: "cli:disabled" }),
+			enqueued_at: "2026-04-14T10:00:00Z",
+			retry_count: 0,
+		};
+		const result = await engine.runDrainPipeline([queued]);
+
+		expect(runnerCalls).toBe(0);
+		expect(result.status).toBe("skip");
+		expect(result.changes).toHaveLength(0);
+		// session_count must still tick so the dedup set keeps working.
+		expect(engine.getMetrics().session_count).toBe(1);
+		// reflection_stats must reflect the disabled-mode drain so operators
+		// can see it in metrics rather than wonder why nothing is happening.
+		const metrics = JSON.parse(readFileSync(`${TEST_DIR}/phantom-config/meta/metrics.json`, "utf-8"));
+		expect(metrics.reflection_stats.drains).toBe(1);
+		expect(metrics.reflection_stats.status_skip).toBe(1);
 	});
 });

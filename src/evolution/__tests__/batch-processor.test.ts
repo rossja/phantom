@@ -8,9 +8,9 @@ import { EvolutionQueue, type QueuedSession } from "../queue.ts";
 import type { ReflectionSubprocessResult, SessionSummary } from "../types.ts";
 
 // Phase 3 batch processor tests. Focused on the rewrite: one subprocess
-// call per batch, mapping invariant hard fails to invariantFailed=true
-// entries, transient crashes to invariantFailed=false entries, and skip/ok
-// to successful entries the cadence can markProcessed.
+// call per batch, mapping invariant hard fails to disposition:"invariant_failed"
+// entries, transient crashes to disposition:"transient" entries, and clean
+// ok/skip to disposition:"ok"/"skip" entries the cadence can markProcessed.
 
 function newDb(): Database {
 	const db = new Database(":memory:");
@@ -95,23 +95,25 @@ describe("processBatch", () => {
 		const result = await processBatch(queue.drainAll(), engine);
 		expect(result.successCount).toBe(2);
 		expect(result.failureCount).toBe(0);
-		for (const entry of result.results) expect(entry.ok).toBe(true);
+		for (const entry of result.results) expect(entry.disposition).toBe("ok");
 	});
 
-	test("skip status still marks every row ok", async () => {
+	test("skip status flows through as disposition:skip", async () => {
 		const queue = new EvolutionQueue(db);
 		queue.enqueue(makeSummary("a"), DECISION);
 		const engine = fakeEngine(async () => baseResult({ status: "skip" }));
 		const result = await processBatch(queue.drainAll(), engine);
 		expect(result.successCount).toBe(1);
+		for (const entry of result.results) expect(entry.disposition).toBe("skip");
 	});
 
-	test("invariant hard fail marks every row as invariantFailed", async () => {
+	test("invariant hard fail marks every row disposition:invariant_failed", async () => {
 		const queue = new EvolutionQueue(db);
 		queue.enqueue(makeSummary("a"), DECISION);
 		queue.enqueue(makeSummary("b"), DECISION);
 		const engine = fakeEngine(async () =>
 			baseResult({
+				status: "skip",
 				invariantHardFailures: [{ check: "I1", message: "scope" }],
 				incrementRetryOnFailure: true,
 				error: "I1",
@@ -120,23 +122,24 @@ describe("processBatch", () => {
 		const result = await processBatch(queue.drainAll(), engine);
 		expect(result.failureCount).toBe(2);
 		for (const entry of result.results) {
-			expect(entry.ok).toBe(false);
-			if (!entry.ok) expect(entry.invariantFailed).toBe(true);
+			expect(entry.disposition).toBe("invariant_failed");
+			expect(entry.error).toContain("I1");
 		}
 	});
 
-	test("transient subprocess error is reported as a non-invariant failure", async () => {
+	test("subprocess error without invariant fail is reported as disposition:transient", async () => {
 		const queue = new EvolutionQueue(db);
 		queue.enqueue(makeSummary("a"), DECISION);
 		const engine = fakeEngine(async () => baseResult({ error: "killed", status: "skip" }));
 		const result = await processBatch(queue.drainAll(), engine);
 		expect(result.failureCount).toBe(1);
 		for (const entry of result.results) {
-			if (!entry.ok) expect(entry.invariantFailed).toBe(false);
+			expect(entry.disposition).toBe("transient");
+			expect(entry.error).toBe("killed");
 		}
 	});
 
-	test("runDrainPipeline throwing is captured as a transient failure on every row", async () => {
+	test("runDrainPipeline throwing is captured as disposition:transient on every row", async () => {
 		const queue = new EvolutionQueue(db);
 		queue.enqueue(makeSummary("a"), DECISION);
 		queue.enqueue(makeSummary("b"), DECISION);
@@ -147,10 +150,8 @@ describe("processBatch", () => {
 		const result = await processBatch(queue.drainAll(), engine);
 		expect(result.failureCount).toBe(3);
 		for (const entry of result.results) {
-			if (!entry.ok) {
-				expect(entry.invariantFailed).toBe(false);
-				expect(entry.error).toContain("runtime blew up");
-			}
+			expect(entry.disposition).toBe("transient");
+			expect(entry.error).toContain("runtime blew up");
 		}
 	});
 

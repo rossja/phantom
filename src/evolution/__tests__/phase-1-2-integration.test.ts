@@ -35,7 +35,7 @@ function setupTestEnvironment(): void {
 		CONFIG_PATH,
 		[
 			"reflection:",
-			'  enabled: "never"',
+			'  enabled: "always"',
 			"paths:",
 			`  config_dir: "${TEST_DIR}/phantom-config"`,
 			`  constitution: "${TEST_DIR}/phantom-config/constitution.md"`,
@@ -69,7 +69,7 @@ function setupTestEnvironment(): void {
 			parent: null,
 			timestamp: "2026-03-25T00:00:00Z",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);
@@ -79,12 +79,10 @@ function setupTestEnvironment(): void {
 			session_count: 0,
 			success_count: 0,
 			failure_count: 0,
-			correction_count: 0,
 			evolution_count: 0,
 			last_session_at: null,
 			last_evolution_at: null,
 			success_rate_7d: 0,
-			correction_rate_7d: 0,
 		}),
 		"utf-8",
 	);

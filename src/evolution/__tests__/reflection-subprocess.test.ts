@@ -38,7 +38,7 @@ function setupEnv(): EvolutionConfig {
 			parent: null,
 			timestamp: "2026-03-25T00:00:00Z",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);
@@ -199,6 +199,10 @@ describe("runReflectionSubprocess failure modes", () => {
 		const result = await runReflectionSubprocess({ batch: [makeQueued()], config, phantomConfig: null });
 		expect(result.invariantHardFailures.length).toBeGreaterThan(0);
 		expect(result.incrementRetryOnFailure).toBe(true);
+		// MINOR-7: the rolled-back drain reports status:"skip" because nothing
+		// landed on disk. The hard failures live in invariantHardFailures and
+		// the retry flag drives the queue disposition.
+		expect(result.status).toBe("skip");
 		// Snapshot restored.
 		const userProfile = readFileSync(`${TEST_DIR}/user-profile.md`, "utf-8");
 		expect(userProfile).toBe("# User Profile\n\n- existing bullet.\n");

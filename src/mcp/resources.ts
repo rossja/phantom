@@ -149,12 +149,12 @@ function registerConfigChangelogResource(server: McpServer, deps: ResourceDepend
 				return { contents: [{ uri: "phantom://config/changelog", text: JSON.stringify({ versions: [] }) }] };
 			}
 
-			const history = deps.evolution.getVersionHistory(20);
+			const log = deps.evolution.getEvolutionLog(20);
 			return {
 				contents: [
 					{
 						uri: "phantom://config/changelog",
-						text: JSON.stringify({ versions: history }, null, 2),
+						text: JSON.stringify({ entries: log }, null, 2),
 					},
 				],
 			};

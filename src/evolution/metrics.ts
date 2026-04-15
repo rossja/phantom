@@ -31,7 +31,6 @@ export function writeMetrics(config: EvolutionConfig, metrics: EvolutionMetrics)
 export function updateAfterSession(
 	config: EvolutionConfig,
 	outcome: "success" | "failure" | "partial" | "abandoned",
-	hadCorrections: boolean,
 ): EvolutionMetrics {
 	const metrics = readMetrics(config);
 
@@ -43,13 +42,8 @@ export function updateAfterSession(
 		metrics.failure_count++;
 	}
 
-	if (hadCorrections) {
-		metrics.correction_count++;
-	}
-
 	metrics.last_session_at = new Date().toISOString();
 	metrics.success_rate_7d = calculateRollingRate(metrics.success_count, metrics.session_count);
-	metrics.correction_rate_7d = calculateRollingRate(metrics.correction_count, metrics.session_count);
 
 	writeMetrics(config, metrics);
 	return metrics;
@@ -75,7 +69,6 @@ export function getMetricsSnapshot(config: EvolutionConfig): MetricsSnapshot {
 	return {
 		session_count: metrics.session_count,
 		success_rate_7d: metrics.success_rate_7d,
-		correction_rate_7d: metrics.correction_rate_7d,
 	};
 }
 
@@ -84,12 +77,10 @@ function defaultMetrics(): EvolutionMetrics {
 		session_count: 0,
 		success_count: 0,
 		failure_count: 0,
-		correction_count: 0,
 		evolution_count: 0,
 		last_session_at: null,
 		last_evolution_at: null,
 		success_rate_7d: 0,
-		correction_rate_7d: 0,
 	};
 }
 

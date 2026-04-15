@@ -8,7 +8,6 @@
 export type MetricsSnapshot = {
 	session_count: number;
 	success_rate_7d: number;
-	correction_rate_7d: number;
 };
 
 export type VersionChange = {
@@ -31,12 +30,10 @@ export type EvolutionMetrics = {
 	session_count: number;
 	success_count: number;
 	failure_count: number;
-	correction_count: number;
 	evolution_count: number;
 	last_session_at: string | null;
 	last_evolution_at: string | null;
 	success_rate_7d: number;
-	correction_rate_7d: number;
 };
 
 export type ObservationType = "correction" | "preference" | "error" | "success" | "tool_pattern" | "domain_fact";
@@ -100,7 +97,10 @@ export type EvolvedConfig = {
 
 export type ReflectionTier = "haiku" | "sonnet" | "opus";
 
-export type SubprocessStatus = "ok" | "compact" | "skip" | "escalate";
+// Top-level outcome the subprocess emits in its sentinel. Compaction is a
+// per-change annotation on `SubprocessSentinel.changes[].action`, never a
+// top-level status.
+export type SubprocessStatus = "ok" | "skip" | "escalate";
 
 /**
  * Structured sentinel the reflection subprocess emits on the final line of

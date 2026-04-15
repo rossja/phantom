@@ -31,7 +31,7 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 			parent: 0,
 			timestamp: "t",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		};
 		expect(v.version).toBe(1);
 		expect(v.parent).toBe(0);
@@ -62,15 +62,17 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 		expect(entry.tier).toBe("haiku");
 	});
 
-	test("SubprocessSentinel allows all four status shapes", () => {
+	test("SubprocessSentinel allows the three top-level status shapes", () => {
+		// Compaction is a per-change annotation (action:"compact"), not a
+		// top-level status. The status union is ok | skip | escalate.
 		const ok: SubprocessSentinel = { status: "ok", changes: [{ file: "a.md", action: "edit", summary: "x" }] };
-		const compact: SubprocessSentinel = {
-			status: "compact",
+		const okCompact: SubprocessSentinel = {
+			status: "ok",
 			changes: [{ file: "a.md", action: "compact", expected_shrinkage: 0.5 }],
 		};
 		const skip: SubprocessSentinel = { status: "skip", reason: "nothing to learn" };
 		const escalate: SubprocessSentinel = { status: "escalate", target: "sonnet", reason: "too hard" };
-		expect([ok, compact, skip, escalate]).toHaveLength(4);
+		expect([ok, okCompact, skip, escalate]).toHaveLength(4);
 	});
 
 	test("ReflectionSubprocessResult carries the incrementRetryOnFailure flag", () => {
@@ -126,8 +128,8 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 
 	test("ReflectionTier and SubprocessStatus have the expected shapes", () => {
 		const tiers: ReflectionTier[] = ["haiku", "sonnet", "opus"];
-		const statuses: SubprocessStatus[] = ["ok", "compact", "skip", "escalate"];
+		const statuses: SubprocessStatus[] = ["ok", "skip", "escalate"];
 		expect(tiers).toHaveLength(3);
-		expect(statuses).toHaveLength(4);
+		expect(statuses).toHaveLength(3);
 	});
 });

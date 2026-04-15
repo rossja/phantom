@@ -28,7 +28,7 @@ function snap(files: Record<string, string>): DirectorySnapshot {
 			parent: null,
 			timestamp: "x",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		},
 		files: new Map(Object.entries(files)),
 	};
@@ -140,7 +140,7 @@ describe("runInvariantCheck combined scenarios", () => {
 			"strategies/new-one.md": "# New\n",
 		});
 		const sentinel: SubprocessSentinel = {
-			status: "compact",
+			status: "ok",
 			changes: [{ file: "user-profile.md", action: "compact", expected_shrinkage: 0.9 }],
 		};
 		const result = runInvariantCheck(pre, post, sentinel, emptyConfig());

@@ -42,7 +42,7 @@ function seed(): void {
 			parent: null,
 			timestamp: "x",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);
@@ -189,7 +189,7 @@ describe("buildVersionChanges classification", () => {
 			pre,
 			post,
 			{
-				status: "compact",
+				status: "ok",
 				changes: [{ file: "persona.md", action: "compact", summary: "curated" }],
 			},
 			["s1"],

@@ -62,12 +62,10 @@ describe("evolution metrics", () => {
 			session_count: 10,
 			success_count: 8,
 			failure_count: 1,
-			correction_count: 3,
 			evolution_count: 2,
 			last_session_at: "2026-04-14T10:00:00Z",
 			last_evolution_at: "2026-04-14T10:05:00Z",
 			success_rate_7d: 0.8,
-			correction_rate_7d: 0.3,
 		};
 		writeMetrics(config, next);
 		const read = readMetrics(config);
@@ -77,14 +75,13 @@ describe("evolution metrics", () => {
 
 	test("updateAfterSession increments session_count and success_count", () => {
 		const config = testConfig();
-		updateAfterSession(config, "success", false);
-		updateAfterSession(config, "success", true);
-		updateAfterSession(config, "failure", false);
+		updateAfterSession(config, "success");
+		updateAfterSession(config, "success");
+		updateAfterSession(config, "failure");
 		const metrics = readMetrics(config);
 		expect(metrics.session_count).toBe(3);
 		expect(metrics.success_count).toBe(2);
 		expect(metrics.failure_count).toBe(1);
-		expect(metrics.correction_count).toBe(1);
 	});
 
 	test("updateAfterEvolution bumps evolution_count and last_evolution_at", () => {
@@ -98,8 +95,8 @@ describe("evolution metrics", () => {
 
 	test("getMetricsSnapshot returns a flat tuple for version tagging", () => {
 		const config = testConfig();
-		updateAfterSession(config, "success", false);
-		updateAfterSession(config, "success", true);
+		updateAfterSession(config, "success");
+		updateAfterSession(config, "success");
 		const snapshot = getMetricsSnapshot(config);
 		expect(snapshot.session_count).toBe(2);
 		expect(snapshot.success_rate_7d).toBeCloseTo(1, 2);

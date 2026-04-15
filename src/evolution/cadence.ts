@@ -166,25 +166,31 @@ export class EvolutionCadence {
 		);
 		const result = await processBatch(queued, this.engine);
 
-		// Phase 3 queue disposition:
-		//  - ok rows: delete from queue (markProcessed).
-		//  - invariant hard fail rows: increment retry_count via markFailed,
-		//    which graduates them to the poison pile at count >= 3.
-		//  - transient failure rows (crash, timeout, exception): leave in
-		//    place so the next drain retries them without a retry bump.
+		// Phase 3 queue disposition (switch on the explicit enum carried by
+		// every batch entry):
+		//  - ok / skip:         delete from queue via markProcessed.
+		//  - invariant_failed:  increment retry_count via markFailed; graduates
+		//                       to the poison pile at count >= 3.
+		//  - transient:         leave in place so the next drain retries them
+		//                       without a retry_count bump.
 		const okIds: number[] = [];
 		const failedIds: number[] = [];
 		const failedReasons: Record<number, string> = {};
 		for (const entry of result.results) {
-			if (entry.ok) {
-				okIds.push(entry.id);
-				continue;
-			}
-			if (entry.invariantFailed) {
-				failedIds.push(entry.id);
-				failedReasons[entry.id] = entry.error;
-			} else {
-				console.warn(`[evolution] queue row id=${entry.id} transient failure, leaving in queue: ${entry.error}`);
+			switch (entry.disposition) {
+				case "ok":
+				case "skip":
+					okIds.push(entry.id);
+					break;
+				case "invariant_failed":
+					failedIds.push(entry.id);
+					failedReasons[entry.id] = entry.error ?? "invariant hard fail";
+					break;
+				case "transient":
+					console.warn(
+						`[evolution] queue row id=${entry.id} transient failure, leaving in queue: ${entry.error ?? "unknown"}`,
+					);
+					break;
 			}
 		}
 		this.queue.markProcessed(okIds);
@@ -199,7 +205,7 @@ export class EvolutionCadence {
 		}
 
 		const appliedCount = result.results.reduce((sum, r) => {
-			if (r.ok) return sum + r.result.changes.length;
+			if (r.disposition === "ok" && r.result) return sum + r.result.changes.length;
 			return sum;
 		}, 0);
 		console.log(

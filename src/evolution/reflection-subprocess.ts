@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildProviderEnv } from "../config/providers.ts";
@@ -79,6 +79,7 @@ export type SimulatedMessage =
 
 export type SpawnQueryInput = {
 	tier: ReflectionTier;
+	drainId: string;
 	batch: QueuedSession[];
 	config: EvolutionConfig;
 	phantomConfig: PhantomConfig | null;
@@ -172,6 +173,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		try {
 			queryResult = await runner({
 				tier,
+				drainId,
 				batch: input.batch,
 				config: input.config,
 				phantomConfig: input.phantomConfig,
@@ -276,7 +278,11 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		if (!invariant.passed) {
 			restoreSnapshot(input.config, snapshot);
 			stats.invariant_failed_hard = (stats.invariant_failed_hard ?? 0) + 1;
-			baseResult.status = "ok";
+			// The drain rolled back: nothing landed on disk, so the truthful
+			// top-level status is "skip" (paired with hard-fail diagnostics
+			// in invariantHardFailures and incrementRetryOnFailure=true so the
+			// batch processor can route the rows to markFailed).
+			baseResult.status = "skip";
 			baseResult.tier = tier;
 			baseResult.escalatedFromTier = escalatedFrom;
 			baseResult.error = invariant.hardFailures.map((f) => `${f.check}: ${f.message}`).join("; ");
@@ -457,7 +463,7 @@ function isSentinelShape(value: unknown): value is SubprocessSentinel {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	const status = v.status;
-	if (status !== "ok" && status !== "compact" && status !== "skip" && status !== "escalate") return false;
+	if (status !== "ok" && status !== "skip" && status !== "escalate") return false;
 	return true;
 }
 
@@ -526,10 +532,6 @@ function bumpFilesTouched(stats: Partial<ReflectionStats>, changes: VersionChang
 	}
 }
 
-// Silence unused import warnings in production (readFileSync is consumed by
-// default runner when the SDK path opts to read the staging file header).
-void readFileSync;
-
 /**
  * Default production runner: spawns the Agent SDK `query()` subprocess with
  * the reflection sandbox. Builds the SDK options object, streams messages,
@@ -537,7 +539,7 @@ void readFileSync;
  * signals, and returns a normalised SpawnQueryResult.
  */
 async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> {
-	const { tier, config, phantomConfig, systemPrompt, abortSignal } = input;
+	const { tier, drainId, config, phantomConfig, systemPrompt, abortSignal } = input;
 	const root = config.paths.config_dir;
 	const providerEnv = phantomConfig ? buildProviderEnv(phantomConfig) : {};
 	const model = TIER_MODELS[tier];
@@ -585,8 +587,6 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 	// built-in tools (Bash, Task, WebFetch) are available. The systemPrompt
 	// is a plain string (no preset envelope) so the subprocess sees only
 	// the reflection teaching prompt, not the Claude Code base prompt.
-	const batchFile = `./.staging/${input.batch.length > 0 ? "batch" : "batch"}-latest.jsonl`;
-	void batchFile;
 
 	const controller = new AbortController();
 	const forwardAbort = (): void => controller.abort();
@@ -602,7 +602,7 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 
 	try {
 		const stream = query({
-			prompt: "Read the batch file in ./.staging/ and manage memory. Follow the teaching prompt. End with a sentinel.",
+			prompt: `Read ./.staging/${drainId}.jsonl and manage memory. Follow the teaching prompt. End with a sentinel.`,
 			options: {
 				model,
 				cwd: root,

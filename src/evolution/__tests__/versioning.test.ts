@@ -6,6 +6,8 @@ import type { EvolutionVersion, SubprocessSentinel, VersionChange } from "../typ
 import {
 	buildVersionChanges,
 	createNextVersion,
+	getEvolutionLog,
+	migrateOldLogEntry,
 	readVersion,
 	restoreSnapshot,
 	snapshotDirectory,
@@ -49,7 +51,7 @@ function seedConfigTree(): void {
 			parent: null,
 			timestamp: "2026-03-25T00:00:00Z",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		}),
 		"utf-8",
 	);
@@ -95,7 +97,7 @@ describe("Versioning", () => {
 					session_ids: ["s1"],
 				},
 			],
-			metrics_at_change: { session_count: 1, success_rate_7d: 1, correction_rate_7d: 0.5 },
+			metrics_at_change: { session_count: 1, success_rate_7d: 1 },
 		};
 		writeVersion(config, next);
 		const persisted = JSON.parse(readFileSync(`${TEST_DIR}/meta/version.json`, "utf-8"));
@@ -109,12 +111,12 @@ describe("Versioning", () => {
 			parent: 2,
 			timestamp: "x",
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		};
 		const changes: VersionChange[] = [
 			{ file: "persona.md", type: "edit", summary: "tone", rationale: "r", session_ids: ["s"] },
 		];
-		const next = createNextVersion(current, changes, { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 });
+		const next = createNextVersion(current, changes, { session_count: 0, success_rate_7d: 0 });
 		expect(next.version).toBe(4);
 		expect(next.parent).toBe(3);
 		expect(next.changes).toEqual(changes);
@@ -211,6 +213,116 @@ describe("Versioning", () => {
 			expect(byFile.get("persona.md")?.type).toBe("compact");
 			expect(byFile.get("strategies/new-strategy.md")?.type).toBe("new");
 			expect(byFile.get("user-profile.md")?.summary).toBe("added context7 plugin note");
+		});
+	});
+
+	describe("migrateOldLogEntry / getEvolutionLog", () => {
+		test("migrates an old-shape entry (singular session_id, append/remove, content) to the new shape", () => {
+			// Representative old-shape row: singular session_id, details[].type
+			// in append|replace|remove, details[].content. The migration helper
+			// must up-convert this to drain_id + session_ids[] + tier + status
+			// + details[].summary so downstream consumers see one shape.
+			const raw = {
+				timestamp: "2026-03-01T00:00:00Z",
+				version: 12,
+				session_id: "session-old-1",
+				changes_applied: 2,
+				changes_rejected: 0,
+				details: [
+					{
+						file: "user-profile.md",
+						type: "append",
+						content: "User prefers TypeScript strict mode.",
+						rationale: "observation from session",
+						session_ids: ["session-old-1"],
+					},
+					{
+						file: "memory/principles.md",
+						type: "remove",
+						content: "Outdated principle removed.",
+						rationale: "superseded",
+						session_ids: ["session-old-1"],
+					},
+				],
+			};
+			const migrated = migrateOldLogEntry(raw);
+			expect(migrated).not.toBeNull();
+			if (!migrated) return;
+			expect(migrated.version).toBe(12);
+			expect(migrated.session_ids).toEqual(["session-old-1"]);
+			expect(migrated.drain_id).toBe("legacy-session-old-1");
+			expect(migrated.tier).toBe("skip");
+			expect(migrated.status).toBe("ok");
+			expect(migrated.changes_applied).toBe(2);
+			expect(migrated.details).toHaveLength(2);
+			expect(migrated.details[0].type).toBe("edit");
+			expect(migrated.details[0].summary).toBe("User prefers TypeScript strict mode.");
+			expect(migrated.details[1].type).toBe("delete");
+			expect(migrated.details[1].summary).toBe("Outdated principle removed.");
+		});
+
+		test("preserves a new-shape entry round-trip with no field loss", () => {
+			const raw = {
+				timestamp: "2026-04-14T10:00:00Z",
+				version: 30,
+				drain_id: "batch-abc-xyz",
+				session_ids: ["s1", "s2"],
+				tier: "sonnet",
+				status: "ok",
+				changes_applied: 1,
+				details: [
+					{
+						file: "domain-knowledge.md",
+						type: "edit",
+						summary: "added rails 8 fact",
+						rationale: "drain=batch-abc-xyz sessions=2",
+						session_ids: ["s1", "s2"],
+					},
+				],
+			};
+			const migrated = migrateOldLogEntry(raw);
+			expect(migrated).not.toBeNull();
+			if (!migrated) return;
+			expect(migrated.drain_id).toBe("batch-abc-xyz");
+			expect(migrated.session_ids).toEqual(["s1", "s2"]);
+			expect(migrated.tier).toBe("sonnet");
+			expect(migrated.status).toBe("ok");
+			expect(migrated.details[0].type).toBe("edit");
+			expect(migrated.details[0].summary).toBe("added rails 8 fact");
+		});
+
+		test("getEvolutionLog reads a mixed file with both shapes interleaved", () => {
+			const config = testConfig();
+			const oldRow = {
+				timestamp: "2026-03-01T00:00:00Z",
+				version: 10,
+				session_id: "old-1",
+				details: [{ file: "persona.md", type: "replace", content: "tone tweak" }],
+			};
+			const newRow = {
+				timestamp: "2026-04-14T10:00:00Z",
+				version: 11,
+				drain_id: "batch-new-1",
+				session_ids: ["new-1"],
+				tier: "haiku",
+				status: "ok",
+				changes_applied: 1,
+				details: [{ file: "user-profile.md", type: "edit", summary: "new fact" }],
+			};
+			writeFileSync(config.paths.evolution_log, `${JSON.stringify(oldRow)}\n${JSON.stringify(newRow)}\n`, "utf-8");
+			const entries = getEvolutionLog(config, 50);
+			expect(entries).toHaveLength(2);
+			expect(entries[0].version).toBe(10);
+			expect(entries[0].details[0].type).toBe("edit"); // replace -> edit
+			expect(entries[0].details[0].summary).toBe("tone tweak");
+			expect(entries[1].version).toBe(11);
+			expect(entries[1].drain_id).toBe("batch-new-1");
+		});
+
+		test("migrateOldLogEntry returns null on rows without a version field", () => {
+			expect(migrateOldLogEntry({ timestamp: "x" })).toBeNull();
+			expect(migrateOldLogEntry(null)).toBeNull();
+			expect(migrateOldLogEntry("not an object")).toBeNull();
 		});
 	});
 });

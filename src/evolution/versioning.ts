@@ -1,7 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { EvolutionConfig } from "./config.ts";
-import type { EvolutionVersion, MetricsSnapshot, SubprocessSentinel, VersionChange } from "./types.ts";
+import type {
+	EvolutionLogEntry,
+	EvolutionVersion,
+	MetricsSnapshot,
+	ReflectionTier,
+	SubprocessSentinel,
+	SubprocessStatus,
+	VersionChange,
+} from "./types.ts";
 
 /**
  * Read the current version from phantom-config/meta/version.json.
@@ -18,7 +26,7 @@ export function readVersion(config: EvolutionConfig): EvolutionVersion {
 			parent: null,
 			timestamp: new Date().toISOString(),
 			changes: [],
-			metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			metrics_at_change: { session_count: 0, success_rate_7d: 0 },
 		};
 	}
 }
@@ -51,36 +59,139 @@ export function createNextVersion(
 }
 
 /**
- * Get version history by walking the evolution-log.jsonl.
+ * Walk evolution-log.jsonl and return up to `limit` recent entries in the
+ * Phase 3 EvolutionLogEntry shape. Old pre-Phase-3 entries on disk
+ * (singular session_id, append/replace/remove change types, content field)
+ * are migrated on read so downstream consumers see one shape.
  */
-export function getHistory(config: EvolutionConfig, limit = 50): EvolutionVersion[] {
+export function getEvolutionLog(config: EvolutionConfig, limit = 50): EvolutionLogEntry[] {
 	const historyPath = config.paths.evolution_log;
-	const history: EvolutionVersion[] = [];
+	const entries: EvolutionLogEntry[] = [];
 
 	try {
 		const text = readFileSync(historyPath, "utf-8").trim();
-		if (!text) return [readVersion(config)];
+		if (!text) return [];
 
 		const lines = text.split("\n").filter(Boolean);
 		for (const line of lines.slice(-limit)) {
 			try {
-				const entry = JSON.parse(line) as Partial<EvolutionVersion> & { version?: number };
-				if (typeof entry.version === "number") {
-					history.push(entry as EvolutionVersion);
-				}
+				const raw: unknown = JSON.parse(line);
+				const migrated = migrateOldLogEntry(raw);
+				if (migrated) entries.push(migrated);
 			} catch {
-				// Skip malformed lines
+				// Skip malformed lines.
 			}
 		}
 	} catch {
-		// No history file, return current version only
+		// No history file: return an empty log rather than synthesising
+		// a fake entry. Callers (the MCP changelog resource, the engine
+		// public surface) can render an empty list directly.
 	}
 
-	if (history.length === 0) {
-		history.push(readVersion(config));
+	return entries;
+}
+
+/**
+ * Up-convert a raw evolution-log.jsonl row to the Phase 3 EvolutionLogEntry
+ * shape. The function accepts both the old shape (singular session_id,
+ * details[].type in append|replace|remove, details[].content) and the new
+ * shape (drain_id, session_ids[], tier, status, details[].type in
+ * edit|compact|new|delete, details[].summary). Returns null when the row
+ * is unrecognisable or missing the version field.
+ *
+ * The append-only evolution log persists on disk across upgrades, so
+ * read-time migration is the only place backward compat is allowed in
+ * Phase 3. Writers always emit the new shape.
+ */
+export function migrateOldLogEntry(raw: unknown): EvolutionLogEntry | null {
+	if (!raw || typeof raw !== "object") return null;
+	const obj = raw as Record<string, unknown>;
+	const version = typeof obj.version === "number" ? obj.version : null;
+	if (version === null) return null;
+
+	const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date(0).toISOString();
+	const drainId =
+		typeof obj.drain_id === "string"
+			? obj.drain_id
+			: typeof obj.session_id === "string"
+				? `legacy-${obj.session_id}`
+				: `legacy-v${version}`;
+
+	let sessionIds: string[];
+	if (Array.isArray(obj.session_ids)) {
+		sessionIds = obj.session_ids.filter((s): s is string => typeof s === "string");
+	} else if (typeof obj.session_id === "string") {
+		sessionIds = [obj.session_id];
+	} else {
+		sessionIds = [];
 	}
 
-	return history;
+	const tier = normaliseTier(obj.tier);
+	const status = normaliseStatus(obj.status);
+	const details = normaliseDetails(obj.details, sessionIds);
+	const changesApplied = typeof obj.changes_applied === "number" ? obj.changes_applied : details.length;
+
+	return {
+		timestamp,
+		version,
+		drain_id: drainId,
+		session_ids: sessionIds,
+		tier,
+		status,
+		changes_applied: changesApplied,
+		details,
+	};
+}
+
+function normaliseTier(value: unknown): ReflectionTier | "skip" {
+	if (value === "haiku" || value === "sonnet" || value === "opus" || value === "skip") return value;
+	// Old-shape rows have no tier field. Default to "skip" so downstream
+	// consumers do not need a special case for missing tier.
+	return "skip";
+}
+
+function normaliseStatus(value: unknown): SubprocessStatus {
+	if (value === "ok" || value === "skip" || value === "escalate") return value;
+	// Old-shape rows have no status. They were always applied (otherwise
+	// they would not be in the log), so map missing/unknown to "ok".
+	return "ok";
+}
+
+function normaliseDetails(value: unknown, sessionIds: string[]): VersionChange[] {
+	if (!Array.isArray(value)) return [];
+	const out: VersionChange[] = [];
+	for (const item of value) {
+		if (!item || typeof item !== "object") continue;
+		const obj = item as Record<string, unknown>;
+		const file = typeof obj.file === "string" ? obj.file : null;
+		if (!file) continue;
+		const type = mapDetailType(obj.type);
+		// Old shape stored prose under `content`, new shape under `summary`.
+		const summary = typeof obj.summary === "string" ? obj.summary : typeof obj.content === "string" ? obj.content : "";
+		const rationale = typeof obj.rationale === "string" ? obj.rationale : "";
+		const itemSessionIds = Array.isArray(obj.session_ids)
+			? obj.session_ids.filter((s): s is string => typeof s === "string")
+			: sessionIds;
+		out.push({ file, type, summary, rationale, session_ids: itemSessionIds });
+	}
+	return out;
+}
+
+function mapDetailType(value: unknown): VersionChange["type"] {
+	switch (value) {
+		case "edit":
+		case "compact":
+		case "new":
+		case "delete":
+			return value;
+		case "append":
+		case "replace":
+			return "edit";
+		case "remove":
+			return "delete";
+		default:
+			return "edit";
+	}
 }
 
 /**

@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import { type EvolutionConfig, loadEvolutionConfig } from "./config.ts";
-import { ConstitutionChecker } from "./constitution.ts";
 import type { GateDecision } from "./gate-types.ts";
 import { appendGateLog, decideGate, recordGateDecision } from "./gate.ts";
 import {
@@ -16,13 +15,13 @@ import {
 import type { EvolutionQueue } from "./queue.ts";
 import { runReflectionSubprocess } from "./reflection-subprocess.ts";
 import type {
+	EvolutionLogEntry,
 	EvolutionResult,
-	EvolutionVersion,
 	EvolvedConfig,
 	ReflectionSubprocessResult,
 	SessionSummary,
 } from "./types.ts";
-import { getHistory, readVersion } from "./versioning.ts";
+import { getEvolutionLog, readVersion } from "./versioning.ts";
 
 // Phase 3 evolution engine.
 //
@@ -41,7 +40,6 @@ export type EnqueueResult = {
 
 export class EvolutionEngine {
 	private config: EvolutionConfig;
-	private checker: ConstitutionChecker;
 	private reflectionEnabled: boolean;
 	private runtime: AgentRuntime | null;
 
@@ -66,7 +64,16 @@ export class EvolutionEngine {
 
 	constructor(configPath?: string, runtime?: AgentRuntime) {
 		this.config = loadEvolutionConfig(configPath);
-		this.checker = new ConstitutionChecker(this.config);
+		// Constitution presence is a hard precondition. The reflection
+		// subprocess never writes constitution.md (sandbox deny + invariant
+		// I2 byte compare), but the engine still expects the file to exist
+		// so the subprocess can read it as identity context. Fail loud at
+		// boot rather than at first drain.
+		if (!existsSync(this.config.paths.constitution)) {
+			throw new Error(
+				`Constitution file not found at ${this.config.paths.constitution}. The constitution is required for the evolution engine to function.`,
+			);
+		}
 		this.runtime = runtime ?? null;
 		this.reflectionEnabled = this.resolveReflectionMode();
 		if (this.reflectionEnabled) {
@@ -113,10 +120,6 @@ export class EvolutionEngine {
 		return this.config;
 	}
 
-	getConstitutionChecker(): ConstitutionChecker {
-		return this.checker;
-	}
-
 	private skippedResult(): EvolutionResult {
 		return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };
 	}
@@ -158,7 +161,20 @@ export class EvolutionEngine {
 			const session = q.session_summary;
 			if (this.countedSessionKeys.has(session.session_key)) continue;
 			this.countedSessionKeys.add(session.session_key);
-			updateAfterSession(this.config, session.outcome, false);
+			updateAfterSession(this.config, session.outcome);
+		}
+
+		// Disabled-mode short-circuit. With reflection.enabled:"never" or auto
+		// + no credentials, the engine MUST NOT spawn the SDK subprocess. We
+		// still record a synthetic skip in reflection_stats so operators can
+		// see drain activity in metrics, and we still return a clean ok-style
+		// result so the cadence drains the queue rather than wedging on a
+		// transient-failure loop.
+		if (!this.reflectionEnabled) {
+			const result = this.disabledDrainResult();
+			recordReflectionRun(this.config, result.statsDelta);
+			this.logDrainSummary(result);
+			return result;
 		}
 
 		const result = await runReflectionSubprocess({
@@ -176,6 +192,30 @@ export class EvolutionEngine {
 
 		this.logDrainSummary(result);
 		return result;
+	}
+
+	/**
+	 * Build a synthetic ReflectionSubprocessResult for the disabled-mode
+	 * short-circuit. The shape is the cleanest possible "drain consumed,
+	 * nothing happened" so the batch processor maps it to disposition:"skip"
+	 * and the cadence deletes the queue rows via markProcessed.
+	 */
+	private disabledDrainResult(): ReflectionSubprocessResult {
+		return {
+			drainId: `disabled-${Date.now().toString(36)}`,
+			status: "skip",
+			tier: "haiku",
+			escalatedFromTier: null,
+			version: this.getCurrentVersion(),
+			changes: [],
+			invariantHardFailures: [],
+			invariantSoftWarnings: [],
+			costUsd: 0,
+			durationMs: 0,
+			error: null,
+			incrementRetryOnFailure: false,
+			statsDelta: { drains: 1, status_skip: 1 },
+		};
 	}
 
 	/**
@@ -215,7 +255,21 @@ export class EvolutionEngine {
 	private async runSingleSession(session: SessionSummary): Promise<EvolutionResult> {
 		if (!this.countedSessionKeys.has(session.session_key)) {
 			this.countedSessionKeys.add(session.session_key);
-			updateAfterSession(this.config, session.outcome, false);
+			updateAfterSession(this.config, session.outcome);
+		}
+
+		// Disabled-mode short-circuit on the direct-call path too. Same
+		// invariants as runDrainPipeline: still record stats, still return a
+		// clean skip, never spawn the SDK.
+		if (!this.reflectionEnabled) {
+			const result = this.disabledDrainResult();
+			recordReflectionRun(this.config, result.statsDelta);
+			this.logDrainSummary(result);
+			return {
+				version: this.getCurrentVersion(),
+				changes_applied: [],
+				changes_rejected: [],
+			};
 		}
 
 		const queued: import("./queue.ts").QueuedSession = {
@@ -301,8 +355,8 @@ export class EvolutionEngine {
 		return readVersion(this.config).version;
 	}
 
-	getVersionHistory(limit = 50): EvolutionVersion[] {
-		return getHistory(this.config, limit);
+	getEvolutionLog(limit = 50): EvolutionLogEntry[] {
+		return getEvolutionLog(this.config, limit);
 	}
 
 	getMetrics() {

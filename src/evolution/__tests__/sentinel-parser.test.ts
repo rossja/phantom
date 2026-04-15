@@ -23,11 +23,14 @@ describe("parseSentinel", () => {
 		expect(r?.target).toBe("sonnet");
 	});
 
-	test("parses a compact sentinel with shrinkage", () => {
+	test("parses a sentinel with a compact per-change action and shrinkage", () => {
+		// Compaction is a per-change annotation (action:"compact"), not a
+		// top-level status. The status union is ok | skip | escalate.
 		const r = parseSentinel(
-			'{"status":"compact","changes":[{"file":"user-profile.md","action":"compact","expected_shrinkage":0.5}]}',
+			'{"status":"ok","changes":[{"file":"user-profile.md","action":"compact","expected_shrinkage":0.5}]}',
 		);
-		expect(r?.status).toBe("compact");
+		expect(r?.status).toBe("ok");
+		expect(r?.changes?.[0].action).toBe("compact");
 		expect(r?.changes?.[0].expected_shrinkage).toBe(0.5);
 	});
 

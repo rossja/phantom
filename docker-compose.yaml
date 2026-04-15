@@ -64,11 +64,11 @@ services:
     deploy:
       resources:
         limits:
-          # 8 GiB is sized for peak LLM-judge concurrency: main process plus an
-          # active agent query subprocess plus up to five Claude Code judge
-          # subprocesses (observation, regression, constitution, safety, and
-          # consolidation) spawned via runJudgeQuery. The prior 2 GiB cap
-          # cgroup-OOM-killed judge subprocesses under evolution load.
+          # 8 GiB sizes for peak Phase 3 reflection concurrency: the main
+          # phantom process plus an active agent query subprocess plus one
+          # reflection subprocess running at Haiku, Sonnet, or Opus tier.
+          # Qdrant and Ollama get their own caps below. The prior 2 GiB cap
+          # cgroup-OOM-killed evolution subprocesses under load.
           memory: 8G
         reservations:
           memory: 512M

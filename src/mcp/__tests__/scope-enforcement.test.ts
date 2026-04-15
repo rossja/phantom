@@ -33,22 +33,18 @@ function createMockEvolution() {
 			userProfile: "",
 			domainKnowledge: "",
 			strategies: { taskPatterns: "", toolPreferences: "", errorRecovery: "" },
-			meta: { version: 1, metricsSnapshot: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 } },
+			meta: { version: 1, metricsSnapshot: { session_count: 0, success_rate_7d: 0 } },
 		}),
 		getMetrics: () => ({
 			session_count: 0,
 			success_count: 0,
 			failure_count: 0,
-			correction_count: 0,
 			evolution_count: 0,
-			rollback_count: 0,
 			last_session_at: "",
 			last_evolution_at: "",
 			success_rate_7d: 0,
-			correction_rate_7d: 0,
-			sessions_since_consolidation: 0,
 		}),
-		getVersionHistory: () => [],
+		getEvolutionLog: () => [],
 	};
 }
 

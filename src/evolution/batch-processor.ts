@@ -7,14 +7,28 @@ import type { ReflectionSubprocessResult } from "./types.ts";
 // signature stays compatible with cadence.ts so the downstream drain
 // handling continues to work without changes.
 //
-// Transient failures (subprocess crash, timeout, parse fail with no
-// writes) leave rows in the queue so the next drain retries them.
-// Invariant hard failures increment retry_count on the rows and graduate
-// them to the poison pile at count >= 3 per Phase 3 failure mode case 4.
+// Each row carries an explicit `disposition` enum so the cadence routes
+// queue rows by name rather than by an implicit `ok` boolean derived from
+// an unrelated string field. The four dispositions are:
+//
+//   - "ok":               drain applied changes (or had nothing to write).
+//                         markProcessed deletes the rows.
+//   - "skip":             clean skip (subprocess returned status:"skip"
+//                         with no error). markProcessed deletes the rows.
+//   - "transient":        subprocess crashed, timed out, or threw. Rows
+//                         stay in the queue without a retry_count bump.
+//   - "invariant_failed": subprocess wrote something the invariant check
+//                         rolled back. markFailed bumps retry_count and
+//                         graduates rows to the poison pile at count >= 3.
 
-export type SessionBatchEntry =
-	| { id: number; ok: true; result: ReflectionSubprocessResult }
-	| { id: number; ok: false; error: string; invariantFailed: boolean };
+export type BatchDisposition = "ok" | "skip" | "transient" | "invariant_failed";
+
+export type SessionBatchEntry = {
+	id: number;
+	disposition: BatchDisposition;
+	error: string | null;
+	result: ReflectionSubprocessResult | null;
+};
 
 export type BatchResult = {
 	processed: number;
@@ -23,6 +37,10 @@ export type BatchResult = {
 	results: SessionBatchEntry[];
 	durationMs: number;
 };
+
+function isSuccessDisposition(disposition: BatchDisposition): boolean {
+	return disposition === "ok" || disposition === "skip";
+}
 
 export async function processBatch(queuedSessions: QueuedSession[], engine: EvolutionEngine): Promise<BatchResult> {
 	const startedAt = Date.now();
@@ -37,9 +55,9 @@ export async function processBatch(queuedSessions: QueuedSession[], engine: Evol
 		const msg = err instanceof Error ? err.message : String(err);
 		const results: SessionBatchEntry[] = queuedSessions.map((q) => ({
 			id: q.id,
-			ok: false,
+			disposition: "transient",
 			error: msg,
-			invariantFailed: false,
+			result: null,
 		}));
 		return {
 			processed: results.length,
@@ -50,44 +68,39 @@ export async function processBatch(queuedSessions: QueuedSession[], engine: Evol
 		};
 	}
 
-	const invariantFailed = result.invariantHardFailures.length > 0;
-	const shouldMarkFailed = result.incrementRetryOnFailure || invariantFailed;
-
-	if (shouldMarkFailed) {
-		const results: SessionBatchEntry[] = queuedSessions.map((q) => ({
-			id: q.id,
-			ok: false,
-			error: result.error ?? "invariant hard fail",
-			invariantFailed: true,
-		}));
-		return {
-			processed: results.length,
-			successCount: 0,
-			failureCount: results.length,
-			results,
-			durationMs: Date.now() - startedAt,
-		};
-	}
-
-	// Skip / ok / transient error paths all mark the rows as processed
-	// because the batch was consumed. Transient errors do NOT increment
-	// retry_count; they just keep rows in the queue via a different code
-	// path. The cadence uses `ok` to decide whether to delete from the
-	// queue, so we report ok=true for skip/success and ok=false only for
-	// invariant hard fails.
-	const ok = !result.error;
-	const results: SessionBatchEntry[] = queuedSessions.map((q) => {
-		if (ok) {
-			return { id: q.id, ok: true as const, result };
-		}
-		return { id: q.id, ok: false as const, error: result.error ?? "unknown", invariantFailed: false };
-	});
+	const disposition = classifyDrain(result);
+	const success = isSuccessDisposition(disposition);
+	const results: SessionBatchEntry[] = queuedSessions.map((q) => ({
+		id: q.id,
+		disposition,
+		error: success ? null : (result.error ?? defaultErrorFor(disposition)),
+		result,
+	}));
 
 	return {
 		processed: results.length,
-		successCount: ok ? results.length : 0,
-		failureCount: ok ? 0 : results.length,
+		successCount: success ? results.length : 0,
+		failureCount: success ? 0 : results.length,
 		results,
 		durationMs: Date.now() - startedAt,
 	};
+}
+
+function classifyDrain(result: ReflectionSubprocessResult): BatchDisposition {
+	if (result.invariantHardFailures.length > 0 || result.incrementRetryOnFailure) {
+		return "invariant_failed";
+	}
+	if (result.error) {
+		return "transient";
+	}
+	if (result.status === "skip") {
+		return "skip";
+	}
+	return "ok";
+}
+
+function defaultErrorFor(disposition: BatchDisposition): string {
+	if (disposition === "invariant_failed") return "invariant hard fail";
+	if (disposition === "transient") return "transient subprocess failure";
+	return "unknown";
 }
