@@ -19,6 +19,7 @@ import { loadChannelsConfig, loadConfig } from "./config/loader.ts";
 import { installShutdownHandlers, onShutdown } from "./core/graceful.ts";
 import {
 	setChannelHealthProvider,
+	setChatHandler,
 	setEvolutionVersionProvider,
 	setMcpServerProvider,
 	setMemoryHealthProvider,
@@ -360,6 +361,50 @@ async function main(): Promise<void> {
 		router.register(cli);
 	}
 
+	// Register Web Chat channel (health/discovery only, hot path bypasses router)
+	const { WebChatChannel } = await import("./channels/web.ts");
+	const webChannel = new WebChatChannel();
+	router.register(webChannel);
+
+	// Wire chat HTTP handler
+	const { ChatSessionStore } = await import("./chat/session-store.ts");
+	const { ChatMessageStore } = await import("./chat/message-store.ts");
+	const { ChatEventLog } = await import("./chat/event-log.ts");
+	const { ChatAttachmentStore } = await import("./chat/attachment-store.ts");
+	const { StreamBus } = await import("./chat/stream-bus.ts");
+	const { createChatHandler } = await import("./chat/http.ts");
+	const { startSweepInterval } = await import("./chat/sweep.ts");
+
+	const chatSessionStore = new ChatSessionStore(db);
+	const chatMessageStore = new ChatMessageStore(db);
+	const chatEventLog = new ChatEventLog(db);
+	const chatAttachmentStore = new ChatAttachmentStore(db);
+	const chatStreamBus = new StreamBus();
+
+	const chatHandlerFn = createChatHandler({
+		runtime,
+		sessionStore: chatSessionStore,
+		messageStore: chatMessageStore,
+		eventLog: chatEventLog,
+		attachmentStore: chatAttachmentStore,
+		streamBus: chatStreamBus,
+		getBootstrapData: () => ({
+			agent_name: config.name,
+			evolution_gen: evolution?.getCurrentVersion() ?? 0,
+			memory_count: 0,
+			slack_status: slackChannel?.isConnected() ?? false,
+		}),
+	});
+	setChatHandler(chatHandlerFn);
+	console.log("[phantom] Web Chat channel registered");
+
+	// Chat sweep interval (hourly cleanup)
+	const sweepTimer = startSweepInterval({
+		sessionStore: chatSessionStore,
+		eventLog: chatEventLog,
+		attachmentStore: chatAttachmentStore,
+	});
+
 	// Wire channel health into HTTP server
 	setChannelHealthProvider(() => {
 		const health: Record<string, boolean> = {};
@@ -619,6 +664,9 @@ async function main(): Promise<void> {
 	});
 	onShutdown("Channels", async () => {
 		await router.disconnectAll();
+	});
+	onShutdown("Chat sweep", async () => {
+		clearInterval(sweepTimer);
 	});
 	onShutdown("Database", async () => {
 		closeDatabase();

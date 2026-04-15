@@ -10,6 +10,8 @@ import { handleUiRequest } from "../ui/serve.ts";
 
 const VERSION = "0.18.2";
 
+type ChatHandler = (req: Request) => Promise<Response | null>;
+
 type MemoryHealthProvider = () => Promise<MemoryHealth>;
 type EvolutionVersionProvider = () => number;
 type McpServerProvider = () => PhantomMcpServer | null;
@@ -35,6 +37,7 @@ let webhookHandler: WebhookHandler | null = null;
 let peerHealthProvider: PeerHealthProvider | null = null;
 let schedulerHealthProvider: SchedulerHealthProvider | null = null;
 let triggerDeps: TriggerDeps | null = null;
+let chatHandler: ChatHandler | null = null;
 
 export function setMemoryHealthProvider(provider: MemoryHealthProvider): void {
 	memoryHealthProvider = provider;
@@ -74,6 +77,10 @@ export function setSchedulerHealthProvider(provider: SchedulerHealthProvider): v
 
 export function setTriggerDeps(deps: TriggerDeps): void {
 	triggerDeps = deps;
+}
+
+export function setChatHandler(handler: ChatHandler): void {
+	chatHandler = handler;
 }
 
 let triggerAuth: AuthMiddleware | null = null;
@@ -144,6 +151,11 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 					return Response.json({ status: "error", message: "Webhook channel not configured" }, { status: 503 });
 				}
 				return webhookHandler(req);
+			}
+
+			if (url.pathname.startsWith("/chat") && chatHandler) {
+				const response = await chatHandler(req);
+				if (response) return response;
 			}
 
 			if (url.pathname.startsWith("/ui")) {

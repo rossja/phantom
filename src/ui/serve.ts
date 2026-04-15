@@ -57,13 +57,13 @@ export function getPublicDir(): string {
 	return publicDir;
 }
 
-function getSessionCookie(req: Request): string | null {
+export function getSessionCookie(req: Request): string | null {
 	const cookies = req.headers.get("Cookie") ?? "";
 	const match = cookies.match(/(?:^|;\s*)phantom_session=([^;]*)/);
 	return match ? decodeURIComponent(match[1]) : null;
 }
 
-function isAuthenticated(req: Request): boolean {
+export function isAuthenticated(req: Request): boolean {
 	const token = getSessionCookie(req);
 	return token !== null && isValidSession(token);
 }
@@ -89,7 +89,7 @@ function isPathSafe(urlPath: string): string | null {
 }
 
 function buildSetCookieHeader(sessionToken: string): string {
-	return `${COOKIE_NAME}=${sessionToken}; Path=/ui; HttpOnly; Secure; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`;
+	return `${COOKIE_NAME}=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`;
 }
 
 export async function handleUiRequest(req: Request): Promise<Response> {
