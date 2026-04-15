@@ -244,4 +244,87 @@ export const MIGRATIONS: string[] = [
 		poisoned_at TEXT NOT NULL DEFAULT (datetime('now')),
 		failure_reason TEXT
 	)`,
+
+	// -- Chat Channel Migrations (28-39) --
+
+	`CREATE TABLE IF NOT EXISTS chat_sessions (
+		id TEXT PRIMARY KEY,
+		owner_user_id TEXT NOT NULL DEFAULT 'owner',
+		title TEXT,
+		title_is_manual INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'active',
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+		last_message_at TEXT,
+		first_user_message_at TEXT,
+		message_count INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		total_cost_usd REAL NOT NULL DEFAULT 0,
+		model TEXT,
+		pinned INTEGER NOT NULL DEFAULT 0,
+		forked_from_session_id TEXT REFERENCES chat_sessions(id),
+		forked_from_message_seq INTEGER,
+		deleted_at TEXT,
+		metadata_json TEXT
+	)`,
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner_last_message ON chat_sessions(owner_user_id, last_message_at DESC)",
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status)",
+
+	`CREATE INDEX IF NOT EXISTS idx_chat_sessions_pinned_last_message ON chat_sessions(owner_user_id, pinned DESC, last_message_at DESC) WHERE status = 'active'`,
+
+	`CREATE TABLE IF NOT EXISTS chat_messages (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL REFERENCES chat_sessions(id),
+		seq INTEGER NOT NULL,
+		parent_seq INTEGER,
+		role TEXT NOT NULL,
+		content_json TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		completed_at TEXT,
+		status TEXT NOT NULL DEFAULT 'committed',
+		stop_reason TEXT,
+		input_tokens INTEGER,
+		output_tokens INTEGER,
+		cost_usd REAL,
+		model TEXT,
+		error_text TEXT,
+		UNIQUE(session_id, seq)
+	)`,
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_messages_session_seq ON chat_messages(session_id, seq)",
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created ON chat_messages(session_id, created_at)",
+
+	`CREATE TABLE IF NOT EXISTS chat_attachments (
+		id TEXT PRIMARY KEY,
+		session_id TEXT REFERENCES chat_sessions(id),
+		message_id TEXT REFERENCES chat_messages(id),
+		kind TEXT NOT NULL,
+		filename TEXT,
+		mime_type TEXT,
+		size_bytes INTEGER,
+		storage_path TEXT NOT NULL,
+		sha256 TEXT,
+		uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+		committed_at TEXT
+	)`,
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_attachments_session ON chat_attachments(session_id)",
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_attachments_orphan ON chat_attachments(uploaded_at) WHERE committed_at IS NULL",
+
+	`CREATE TABLE IF NOT EXISTS chat_stream_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL REFERENCES chat_sessions(id),
+		message_id TEXT REFERENCES chat_messages(id),
+		seq INTEGER NOT NULL,
+		event_type TEXT NOT NULL,
+		payload_json TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
+
+	"CREATE INDEX IF NOT EXISTS idx_chat_stream_events_session_seq ON chat_stream_events(session_id, seq)",
 ];
