@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTranslationContext, translateSdkMessage } from "../sdk-to-wire.ts";
 
 function makeCtx(sessionId = "sess-1", messageId = "msg-1") {
-	return createTranslationContext(sessionId, messageId, { current: 0 });
+	return createTranslationContext(sessionId, messageId);
 }
 
 describe("sdk-to-wire translator", () => {
@@ -353,11 +353,109 @@ describe("sdk-to-wire translator", () => {
 		expect(frames.length).toBe(0);
 	});
 
-	test("seq is monotonically increasing", () => {
+	test("session.created carries placeholder seq (assigned by writer)", () => {
 		const ctx = makeCtx();
 		const f1 = translateSdkMessage({ type: "system", subtype: "init", session_id: "s1", mcp_servers: [] }, ctx);
 		if (f1[0].event === "session.created") {
-			expect(f1[0].seq).toBe(1);
+			expect(f1[0].seq).toBe(0);
+		}
+	});
+
+	test("content_block_stop emits only text_end for text block", () => {
+		const ctx = makeCtx();
+		translateSdkMessage(
+			{
+				type: "stream_event",
+				event: { type: "content_block_start", content_block: { type: "text" }, index: 0 },
+				parent_tool_use_id: null,
+			},
+			ctx,
+		);
+		const frames = translateSdkMessage(
+			{ type: "stream_event", event: { type: "content_block_stop", index: 0 }, parent_tool_use_id: null },
+			ctx,
+		);
+		expect(frames.length).toBe(1);
+		expect(frames[0].event).toBe("message.text_end");
+	});
+
+	test("content_block_stop emits only thinking_end for thinking block", () => {
+		const ctx = makeCtx();
+		translateSdkMessage(
+			{
+				type: "stream_event",
+				event: { type: "content_block_start", content_block: { type: "thinking" }, index: 0 },
+				parent_tool_use_id: null,
+			},
+			ctx,
+		);
+		const frames = translateSdkMessage(
+			{ type: "stream_event", event: { type: "content_block_stop", index: 0 }, parent_tool_use_id: null },
+			ctx,
+		);
+		expect(frames.length).toBe(1);
+		expect(frames[0].event).toBe("message.thinking_end");
+	});
+
+	test("content_block_stop emits tool_call_input_end for tool_use block", () => {
+		const ctx = makeCtx();
+		translateSdkMessage(
+			{
+				type: "stream_event",
+				event: {
+					type: "content_block_start",
+					content_block: { type: "tool_use", id: "toolu_abc", name: "Read" },
+					index: 2,
+				},
+				parent_tool_use_id: null,
+			},
+			ctx,
+		);
+		const frames = translateSdkMessage(
+			{ type: "stream_event", event: { type: "content_block_stop", index: 2 }, parent_tool_use_id: null },
+			ctx,
+		);
+		expect(frames.length).toBe(1);
+		expect(frames[0].event).toBe("message.tool_call_input_end");
+	});
+
+	test("content_block_stop emits nothing for unknown block type", () => {
+		const ctx = makeCtx();
+		// Pre-emit assistant_start so the guard does not add an extra frame
+		ctx.assistantStartEmitted = true;
+		const frames = translateSdkMessage(
+			{ type: "stream_event", event: { type: "content_block_stop", index: 99 }, parent_tool_use_id: null },
+			ctx,
+		);
+		expect(frames.length).toBe(0);
+	});
+
+	test("input_json_delta uses real tool_call_id from content_block_start", () => {
+		const ctx = makeCtx();
+		translateSdkMessage(
+			{
+				type: "stream_event",
+				event: {
+					type: "content_block_start",
+					content_block: { type: "tool_use", id: "toolu_real_123", name: "Bash" },
+					index: 1,
+				},
+				parent_tool_use_id: null,
+			},
+			ctx,
+		);
+		const frames = translateSdkMessage(
+			{
+				type: "stream_event",
+				event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '{"cmd' }, index: 1 },
+				parent_tool_use_id: null,
+			},
+			ctx,
+		);
+		expect(frames.length).toBe(1);
+		expect(frames[0].event).toBe("message.tool_call_input_delta");
+		if (frames[0].event === "message.tool_call_input_delta") {
+			expect(frames[0].tool_call_id).toBe("toolu_real_123");
 		}
 	});
 });

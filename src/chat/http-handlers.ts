@@ -23,6 +23,10 @@ export async function handleUpdateSession(req: Request, sessionId: string, deps:
 	} catch {
 		return Response.json({ error: "Invalid JSON" }, { status: 400 });
 	}
+	const validStatuses = new Set(["active", "archived", "deleted"]);
+	if (body.status !== undefined && !validStatuses.has(body.status)) {
+		return Response.json({ error: "Invalid status" }, { status: 400 });
+	}
 	deps.sessionStore.update(sessionId, {
 		title: body.title,
 		pinned: body.pinned,
@@ -81,6 +85,7 @@ export async function handleStream(req: Request, deps: ChatHandlerDeps): Promise
 		sessionStore: deps.sessionStore,
 		streamBus: deps.streamBus,
 	});
+	writer.claim();
 
 	const sessionId = body.session_id;
 	const stream = createSSEStream(sessionId, deps.streamBus, writer);
@@ -109,7 +114,8 @@ export async function handleResume(req: Request, sessionId: string, deps: ChatHa
 	}
 
 	const clientLastSeq = body.client_last_seq ?? 0;
-	const writerActive = getActiveWriter(sessionId)?.isActive ?? false;
+
+	let resumeUnsub: (() => void) | null = null;
 
 	const stream = new ReadableStream({
 		start(controller) {
@@ -123,6 +129,8 @@ export async function handleResume(req: Request, sessionId: string, deps: ChatHa
 			};
 
 			write("retry: 5000\n\n");
+
+			const writerActive = getActiveWriter(sessionId)?.isActive ?? false;
 
 			const resumedFrame: ChatWireFrame = {
 				event: "session.resumed",
@@ -146,17 +154,21 @@ export async function handleResume(req: Request, sessionId: string, deps: ChatHa
 			write(formatSSE(caughtUpFrame, maxSeq + 1));
 
 			if (writerActive) {
-				let currentSeq = maxSeq + 1;
-				const unsubscribe = deps.streamBus.subscribe(sessionId, (frame) => {
-					write(formatSSE(frame, ++currentSeq));
+				resumeUnsub = deps.streamBus.subscribe(sessionId, (frame, seq) => {
+					write(formatSSE(frame, seq));
 					if (frame.event === "session.done" || frame.event === "session.error") {
-						unsubscribe();
+						resumeUnsub?.();
+						resumeUnsub = null;
 						controller.close();
 					}
 				});
 			} else {
 				controller.close();
 			}
+		},
+		cancel() {
+			resumeUnsub?.();
+			resumeUnsub = null;
 		},
 	});
 
@@ -181,6 +193,9 @@ export function formatSSE(frame: ChatWireFrame, seq: number): string {
 }
 
 function createSSEStream(sessionId: string, streamBus: StreamBus, writer: ChatSessionWriter): ReadableStream {
+	let unsub: (() => void) | null = null;
+	let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
 	return new ReadableStream({
 		start(controller) {
 			const encoder = new TextEncoder();
@@ -194,11 +209,13 @@ function createSSEStream(sessionId: string, streamBus: StreamBus, writer: ChatSe
 
 			write("retry: 5000\n\n");
 
-			let seq = 0;
-			const unsubscribe = streamBus.subscribe(sessionId, (frame) => {
-				write(formatSSE(frame, ++seq));
+			unsub = streamBus.subscribe(sessionId, (frame, seq) => {
+				write(formatSSE(frame, seq));
 				if (frame.event === "session.done" || frame.event === "session.error") {
-					unsubscribe();
+					unsub?.();
+					unsub = null;
+					if (keepAliveTimer) clearInterval(keepAliveTimer);
+					keepAliveTimer = null;
 					try {
 						controller.close();
 					} catch {
@@ -207,13 +224,20 @@ function createSSEStream(sessionId: string, streamBus: StreamBus, writer: ChatSe
 				}
 			});
 
-			const keepAlive = setInterval(() => {
+			keepAliveTimer = setInterval(() => {
 				if (!writer.isActive) {
-					clearInterval(keepAlive);
+					if (keepAliveTimer) clearInterval(keepAliveTimer);
+					keepAliveTimer = null;
 					return;
 				}
 				write(":ka\n\n");
 			}, 25000);
+		},
+		cancel() {
+			unsub?.();
+			unsub = null;
+			if (keepAliveTimer) clearInterval(keepAliveTimer);
+			keepAliveTimer = null;
 		},
 	});
 }

@@ -87,6 +87,7 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "hello" }, "tab1", "hello");
 
@@ -129,6 +130,7 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "test" }, "t1", "test");
 		expect(wasActive).toBe(true);
@@ -152,6 +154,7 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "fail" }, "t1", "fail");
 
@@ -174,6 +177,7 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "multi" }, "t1", "multi");
 
@@ -191,6 +195,7 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "seq test" }, "t1", "seq test");
 
@@ -210,8 +215,68 @@ describe("ChatSessionWriter", () => {
 			sessionStore,
 			streamBus,
 		});
+		writer.claim();
 
 		await writer.run({ role: "user", content: "test" }, "t1", "test");
 		expect(getActiveWriter(session.id)).toBeUndefined();
+	});
+
+	test("claim() registers writer in activeWriters synchronously", () => {
+		const session = sessionStore.create();
+		const writer = new ChatSessionWriter({
+			sessionId: session.id,
+			runtime: mockRuntime(),
+			eventLog,
+			messageStore,
+			sessionStore,
+			streamBus,
+		});
+		expect(getActiveWriter(session.id)).toBeUndefined();
+		writer.claim();
+		expect(getActiveWriter(session.id)).toBe(writer);
+		expect(writer.isActive).toBe(true);
+	});
+
+	test("run() throws if claim() not called first", async () => {
+		const session = sessionStore.create();
+		const writer = new ChatSessionWriter({
+			sessionId: session.id,
+			runtime: mockRuntime(),
+			eventLog,
+			messageStore,
+			sessionStore,
+			streamBus,
+		});
+		await expect(writer.run({ role: "user", content: "test" }, "t1", "test")).rejects.toThrow(
+			"Writer must be claimed before run()",
+		);
+	});
+
+	test("session.created frame has seq assigned by writer emitFrame", async () => {
+		const session = sessionStore.create();
+		const frames: ChatWireFrame[] = [];
+		streamBus.subscribe(session.id, (f) => frames.push(f));
+
+		const writer = new ChatSessionWriter({
+			sessionId: session.id,
+			runtime: mockRuntime(),
+			eventLog,
+			messageStore,
+			sessionStore,
+			streamBus,
+		});
+		writer.claim();
+
+		await writer.run({ role: "user", content: "seq check" }, "t1", "seq check");
+
+		const createdFrame = frames.find((f) => f.event === "session.created");
+		expect(createdFrame).toBeDefined();
+		if (createdFrame?.event === "session.created") {
+			expect(createdFrame.seq).toBeGreaterThan(0);
+			// The seq in the payload must match the persisted event log seq
+			const events = eventLog.drain(session.id, 0);
+			const createdEvent = events.find((e) => e.event_type === "session.created");
+			expect(createdEvent?.seq).toBe(createdFrame.seq);
+		}
 	});
 });

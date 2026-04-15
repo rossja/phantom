@@ -6,11 +6,12 @@ import type { ChatWireFrame } from "./types.ts";
 export type TranslationContext = {
 	sessionId: string;
 	messageId: string;
-	nextSeq: () => number;
 	turnIndex: number;
 	seenBlockLengths: Map<number, number>;
 	startedToolIds: Set<string>;
 	assistantStartEmitted: boolean;
+	blockTypes: Map<number, "text" | "thinking" | "tool_use">;
+	blockToolIds: Map<number, string>;
 };
 
 export function handleAssistant(msg: Record<string, unknown>, ctx: TranslationContext): ChatWireFrame[] {
@@ -130,6 +131,7 @@ export function handleStreamEvent(msg: Record<string, unknown>, ctx: Translation
 			const blockType = block?.type as string;
 
 			if (blockType === "text") {
+				ctx.blockTypes.set(index, "text");
 				frames.push({
 					event: "message.text_start",
 					message_id: ctx.messageId,
@@ -137,6 +139,7 @@ export function handleStreamEvent(msg: Record<string, unknown>, ctx: Translation
 					index,
 				});
 			} else if (blockType === "thinking" || blockType === "redacted_thinking") {
+				ctx.blockTypes.set(index, "thinking");
 				frames.push({
 					event: "message.thinking_start",
 					message_id: ctx.messageId,
@@ -145,8 +148,10 @@ export function handleStreamEvent(msg: Record<string, unknown>, ctx: Translation
 					redacted: blockType === "redacted_thinking",
 				});
 			} else if (blockType === "tool_use") {
+				ctx.blockTypes.set(index, "tool_use");
 				const toolId = (block.id as string) ?? `tool_${index}`;
 				ctx.startedToolIds.add(toolId);
+				ctx.blockToolIds.set(index, toolId);
 				const toolName = (block.name as string) ?? "unknown";
 				const isMcp = toolName.includes(":") || toolName.startsWith("mcp_");
 				frames.push({
@@ -181,7 +186,7 @@ export function handleStreamEvent(msg: Record<string, unknown>, ctx: Translation
 			} else if (deltaType === "input_json_delta") {
 				frames.push({
 					event: "message.tool_call_input_delta",
-					tool_call_id: `pending_${index}`,
+					tool_call_id: ctx.blockToolIds.get(index) ?? `unknown_${index}`,
 					json_delta: (delta.partial_json as string) ?? "",
 				});
 			}
@@ -189,8 +194,17 @@ export function handleStreamEvent(msg: Record<string, unknown>, ctx: Translation
 		}
 		case "content_block_stop": {
 			const index = event.index as number;
-			frames.push({ event: "message.text_end", text_block_id: `tb_${ctx.turnIndex}_${index}` });
-			frames.push({ event: "message.thinking_end", thinking_block_id: `tk_${ctx.turnIndex}_${index}` });
+			const stoppedType = ctx.blockTypes.get(index);
+			if (stoppedType === "text") {
+				frames.push({ event: "message.text_end", text_block_id: `tb_${ctx.turnIndex}_${index}` });
+			} else if (stoppedType === "thinking") {
+				frames.push({ event: "message.thinking_end", thinking_block_id: `tk_${ctx.turnIndex}_${index}` });
+			} else if (stoppedType === "tool_use") {
+				const toolId = ctx.blockToolIds.get(index);
+				if (toolId) {
+					frames.push({ event: "message.tool_call_input_end", tool_call_id: toolId, input: {} });
+				}
+			}
 			break;
 		}
 		case "message_stop": {

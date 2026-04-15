@@ -14,7 +14,7 @@ import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { emitPluginInitSnapshot } from "./init-plugin-snapshot.ts";
 import { type JudgeQueryOptions, type JudgeQueryResult, runJudgeQuery } from "./judge-query.ts";
-import { extractTextFromMessageParam, wrapMessageContent } from "./message-param-utils.ts";
+import { wrapMessageContent } from "./message-param-utils.ts";
 import { extractCost, extractTextFromMessage } from "./message-utils.ts";
 import { assemblePrompt } from "./prompt-assembler.ts";
 import { SessionStore } from "./session-store.ts";
@@ -131,9 +131,7 @@ export class AgentRuntime {
 		}
 		this.activeSessions.add(sessionKey);
 
-		const textContent = extractTextFromMessageParam(message);
-		const wrappedText = this.wrapWithSecurityContext(textContent);
-		const wrappedMessage = wrapMessageContent(message, wrappedText);
+		const wrappedMessage = wrapMessageContent(message, (t) => this.wrapWithSecurityContext(t));
 
 		try {
 			return await executeChatQuery(

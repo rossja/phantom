@@ -72,7 +72,7 @@ export class ChatSessionStore {
 			const parts = options.cursor.split("|");
 			if (parts.length === 3) {
 				cursorClause =
-					"AND (pinned < ? OR (pinned = ? AND (COALESCE(last_message_at,'') < ? OR (COALESCE(last_message_at,'') = ? AND id < ?))))";
+					"AND (pinned < ? OR (pinned = ? AND (COALESCE(last_message_at, created_at) < ? OR (COALESCE(last_message_at, created_at) = ? AND id < ?))))";
 				params.push(parts[0], parts[0], parts[1], parts[1], parts[2]);
 			}
 		}
@@ -93,7 +93,7 @@ export class ChatSessionStore {
 
 		if (hasMore && sessions.length > 0) {
 			const last = sessions[sessions.length - 1];
-			nextCursor = `${last.pinned}|${last.last_message_at ?? ""}|${last.id}`;
+			nextCursor = `${last.pinned}|${last.last_message_at ?? last.created_at}|${last.id}`;
 		}
 
 		return { sessions, nextCursor };
@@ -178,13 +178,28 @@ export class ChatSessionStore {
 	}
 
 	hardDeleteExpired(olderThanDays: number): number {
-		const result = this.db.run(
-			`DELETE FROM chat_sessions
-			 WHERE deleted_at IS NOT NULL
-			 AND deleted_at < datetime('now', ?)`,
-			[`-${olderThanDays} days`],
-		);
-		return result.changes;
+		const expiredIds = this.db
+			.query(
+				`SELECT id FROM chat_sessions
+				 WHERE deleted_at IS NOT NULL
+				 AND deleted_at < datetime('now', ?)`,
+			)
+			.all(`-${olderThanDays} days`) as Array<{ id: string }>;
+
+		if (expiredIds.length === 0) return 0;
+
+		const ids = expiredIds.map((r) => r.id);
+		const placeholders = ids.map(() => "?").join(",");
+
+		const txn = this.db.transaction(() => {
+			this.db.run(`DELETE FROM chat_stream_events WHERE session_id IN (${placeholders})`, ids);
+			this.db.run(`DELETE FROM chat_attachments WHERE session_id IN (${placeholders})`, ids);
+			this.db.run(`DELETE FROM chat_messages WHERE session_id IN (${placeholders})`, ids);
+			this.db.run(`DELETE FROM chat_sessions WHERE id IN (${placeholders})`, ids);
+		});
+		txn();
+
+		return ids.length;
 	}
 
 	setAutoTitle(id: string, title: string): void {

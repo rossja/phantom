@@ -18,20 +18,27 @@ export function extractTextFromMessageParam(message: MessageParam): string {
 	return texts.join("\n");
 }
 
-export function wrapMessageContent(message: MessageParam, wrappedText: string): MessageParam {
+export function wrapMessageContent(message: MessageParam, wrapFn: (text: string) => string): MessageParam {
 	if (typeof message.content === "string") {
-		return { ...message, content: wrappedText };
+		return { ...message, content: wrapFn(message.content) };
 	}
 	if (!Array.isArray(message.content)) {
-		return { ...message, content: wrappedText };
+		return { ...message, content: wrapFn("") };
+	}
+	const arr = message.content as unknown[];
+	// Find the last text block - wrap only that one (matches single-string Slack path)
+	let lastTextIdx = -1;
+	for (let i = 0; i < arr.length; i++) {
+		const b = arr[i] as { type?: string };
+		if (b.type === "text") lastTextIdx = i;
 	}
 	const wrapped = [];
-	for (const block of message.content as unknown[]) {
-		const b = block as { type?: string };
-		if (b.type === "text") {
-			wrapped.push({ ...(block as Record<string, unknown>), text: wrappedText });
+	for (let i = 0; i < arr.length; i++) {
+		const b = arr[i] as { type?: string; text?: string };
+		if (i === lastTextIdx && b.type === "text" && b.text) {
+			wrapped.push({ ...(arr[i] as Record<string, unknown>), text: wrapFn(b.text) });
 		} else {
-			wrapped.push(block);
+			wrapped.push(arr[i]);
 		}
 	}
 	return { ...message, content: wrapped as typeof message.content };

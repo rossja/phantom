@@ -13,6 +13,7 @@ import type { RoleTemplate } from "../roles/types.ts";
 import type { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
+import { extractTextFromMessageParam } from "./message-param-utils.ts";
 import { extractCost, extractTextFromMessage } from "./message-utils.ts";
 import { assemblePrompt } from "./prompt-assembler.ts";
 import type { Session, SessionStore } from "./session-store.ts";
@@ -43,7 +44,7 @@ export async function executeChatQuery(
 	const isResume = session?.sdk_session_id != null;
 	if (!session) session = deps.sessionStore.create(channelId, conversationId);
 
-	const textForMemory = typeof message.content === "string" ? message.content : "";
+	const textForMemory = extractTextFromMessageParam(message);
 	let memoryContext: string | undefined;
 	if (deps.memoryContextBuilder && textForMemory) {
 		try {

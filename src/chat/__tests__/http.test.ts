@@ -219,4 +219,55 @@ describe("Chat HTTP handlers", () => {
 		const body = await res?.json();
 		expect(body.forked_from_session_id).toBe(id);
 	});
+
+	test("unauthenticated static file request returns 401", async () => {
+		const res = await handler(makeUnauthReq("/chat/index.html"));
+		expect(res?.status).toBe(401);
+	});
+
+	test("unauthenticated HTML request redirects to login", async () => {
+		const req = new Request("http://localhost:3100/chat/index.html", {
+			headers: { Accept: "text/html,application/xhtml+xml" },
+		});
+		const res = await handler(req);
+		expect(res?.status).toBe(302);
+	});
+
+	test("PATCH with invalid status returns 400", async () => {
+		const createRes = await handler(
+			makeAuthReq("/chat/sessions", {
+				method: "POST",
+				body: JSON.stringify({}),
+			}),
+		);
+		const created = (await createRes?.json()) as { id: string };
+		const id = created.id;
+
+		const res = await handler(
+			makeAuthReq(`/chat/sessions/${id}`, {
+				method: "PATCH",
+				body: JSON.stringify({ status: "bogus_value" }),
+			}),
+		);
+		expect(res?.status).toBe(400);
+	});
+
+	test("PATCH with valid status succeeds", async () => {
+		const createRes = await handler(
+			makeAuthReq("/chat/sessions", {
+				method: "POST",
+				body: JSON.stringify({}),
+			}),
+		);
+		const created = (await createRes?.json()) as { id: string };
+		const id = created.id;
+
+		const res = await handler(
+			makeAuthReq(`/chat/sessions/${id}`, {
+				method: "PATCH",
+				body: JSON.stringify({ status: "archived" }),
+			}),
+		);
+		expect(res?.status).toBe(200);
+	});
 });

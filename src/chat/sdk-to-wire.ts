@@ -8,19 +8,16 @@ import type { ChatWireFrame, StopReason } from "./types.ts";
 
 export type { TranslationContext } from "./sdk-to-wire-handlers.ts";
 
-export function createTranslationContext(
-	sessionId: string,
-	messageId: string,
-	seqCounter: { current: number },
-): TranslationContext {
+export function createTranslationContext(sessionId: string, messageId: string): TranslationContext {
 	return {
 		sessionId,
 		messageId,
-		nextSeq: () => ++seqCounter.current,
 		turnIndex: 0,
 		seenBlockLengths: new Map(),
 		startedToolIds: new Set(),
 		assistantStartEmitted: false,
+		blockTypes: new Map(),
+		blockToolIds: new Map(),
 	};
 }
 
@@ -62,7 +59,7 @@ function handleSystem(msg: Record<string, unknown>, ctx: TranslationContext): Ch
 				sdk_session_id: (msg.session_id as string) ?? "",
 				created_at: new Date().toISOString(),
 				title: null,
-				seq: ctx.nextSeq(),
+				seq: 0,
 			});
 			if (mcpServers.length > 0) {
 				frames.push({ event: "session.mcp_status", servers: mcpServers });

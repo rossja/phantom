@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { MIGRATIONS } from "../../db/schema.ts";
+import { ChatAttachmentStore } from "../attachment-store.ts";
+import { ChatEventLog } from "../event-log.ts";
+import { ChatMessageStore } from "../message-store.ts";
 import { ChatSessionStore } from "../session-store.ts";
 
 let db: Database;
@@ -134,5 +137,62 @@ describe("ChatSessionStore", () => {
 		store.update(s2.id, { pinned: true });
 		const result = store.list();
 		expect(result.sessions[0].pinned).toBe(1);
+	});
+
+	test("hardDeleteExpired removes child rows without FK violation", () => {
+		db.run("PRAGMA foreign_keys = ON");
+		const session = store.create("FK Test");
+		const messageStore = new ChatMessageStore(db);
+		const eventLog = new ChatEventLog(db);
+		const attachmentStore = new ChatAttachmentStore(db);
+
+		messageStore.commit({
+			sessionId: session.id,
+			seq: 1,
+			role: "user",
+			contentJson: JSON.stringify("hello"),
+		});
+		eventLog.append(session.id, null, 1, "user.message", { event: "user.message" });
+		attachmentStore.create({
+			sessionId: session.id,
+			kind: "file",
+			filename: "test.txt",
+			mimeType: "text/plain",
+			sizeBytes: 10,
+			storagePath: "/tmp/test.txt",
+		});
+
+		db.run("UPDATE chat_sessions SET deleted_at = datetime('now', '-31 days') WHERE id = ?", [session.id]);
+
+		// Should not throw FK violation
+		const count = store.hardDeleteExpired(30);
+		expect(count).toBe(1);
+
+		// Verify child rows are gone
+		const messages = messageStore.getBySession(session.id);
+		expect(messages).toHaveLength(0);
+		const events = eventLog.drain(session.id, 0);
+		expect(events).toHaveLength(0);
+	});
+
+	test("cursor pagination uses consistent sort key", () => {
+		// Create sessions without messages (last_message_at is NULL)
+		for (let i = 0; i < 3; i++) {
+			store.create(`NullDate ${i}`);
+		}
+		const page1 = store.list({ limit: 2 });
+		expect(page1.sessions).toHaveLength(2);
+		expect(page1.nextCursor).not.toBeNull();
+
+		// Cursor should encode created_at (not empty string) when last_message_at is null
+		const cursor = page1.nextCursor ?? "";
+		const cursorParts = cursor.split("|");
+		expect(cursorParts[1]).not.toBe("");
+
+		const page2 = store.list({ limit: 2, cursor: page1.nextCursor ?? undefined });
+		expect(page2.sessions).toHaveLength(1);
+		// No duplicates between pages
+		const allIds = [...page1.sessions, ...page2.sessions].map((s) => s.id);
+		expect(new Set(allIds).size).toBe(allIds.length);
 	});
 });

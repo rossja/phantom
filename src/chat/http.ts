@@ -39,6 +39,13 @@ export function createChatHandler(deps: ChatHandlerDeps): (req: Request) => Prom
 			if (response) return response;
 		}
 
+		if (!isAuthenticated(req)) {
+			const accept = req.headers.get("Accept") ?? "";
+			if (accept.includes("text/html")) {
+				return Response.redirect("/ui/login", 302);
+			}
+			return Response.json({ error: "Unauthorized" }, { status: 401 });
+		}
 		return handleChatStaticRequest(req);
 	};
 }

@@ -43,14 +43,17 @@ export class ChatSessionWriter {
 		return this.deps.sessionId;
 	}
 
+	claim(): void {
+		this.running = true;
+		activeWriters.set(this.deps.sessionId, this);
+	}
+
 	async run(message: MessageParam, tabId: string, userText: string): Promise<void> {
-		if (this.running) {
-			throw new Error("Writer already running for this session");
+		if (!this.running) {
+			throw new Error("Writer must be claimed before run()");
 		}
 
-		this.running = true;
 		this.abortController = new AbortController();
-		activeWriters.set(this.deps.sessionId, this);
 
 		const seqCounter = { current: this.deps.eventLog.getMaxSeq(this.deps.sessionId) };
 		const msgSeq = this.deps.messageStore.getMaxSeq(this.deps.sessionId) + 1;
@@ -77,7 +80,7 @@ export class ChatSessionWriter {
 		const assistantSeq = msgSeq + 1;
 		const assistantMessageId = crypto.randomUUID();
 
-		const ctx = createTranslationContext(this.deps.sessionId, assistantMessageId, seqCounter);
+		const ctx = createTranslationContext(this.deps.sessionId, assistantMessageId);
 		const sessionKey = `web:${this.deps.sessionId}`;
 		const startTime = Date.now();
 		let resultText = "";
@@ -170,7 +173,11 @@ export class ChatSessionWriter {
 
 	private emitFrame(frame: ChatWireFrame, seqCounter: { current: number }): void {
 		const seq = ++seqCounter.current;
+		// session.created carries a seq field - assign it here so payload matches persisted seq
+		if (frame.event === "session.created") {
+			(frame as { seq: number }).seq = seq;
+		}
 		this.deps.eventLog.append(this.deps.sessionId, null, seq, frame.event, frame);
-		this.deps.streamBus.publish(this.deps.sessionId, frame);
+		this.deps.streamBus.publish(this.deps.sessionId, frame, seq);
 	}
 }

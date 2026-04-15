@@ -1,6 +1,6 @@
 import type { ChatWireFrame } from "./types.ts";
 
-type FrameCallback = (frame: ChatWireFrame) => void;
+type FrameCallback = (frame: ChatWireFrame, seq: number) => void;
 
 export class StreamBus {
 	private subscribers = new Map<string, Set<FrameCallback>>();
@@ -21,12 +21,12 @@ export class StreamBus {
 		};
 	}
 
-	publish(sessionId: string, frame: ChatWireFrame): void {
+	publish(sessionId: string, frame: ChatWireFrame, seq: number): void {
 		const set = this.subscribers.get(sessionId);
 		if (!set) return;
 		for (const cb of set) {
 			try {
-				cb(frame);
+				cb(frame, seq);
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				console.warn(`[stream-bus] Subscriber error for session ${sessionId}: ${msg}`);
