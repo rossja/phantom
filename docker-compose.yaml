@@ -19,10 +19,6 @@ services:
       # Override memory URLs to use Docker service names
       - QDRANT_URL=http://qdrant:6333
       - OLLAMA_URL=http://ollama:11434
-    # Cap the total number of processes this service can create. A runaway
-    # evolution subprocess spawn loop is bounded here in addition to the
-    # Phase 0 application-layer mutex and the Phase 2 cadence.
-    pids_limit: 256
     # Bias the host OOM killer toward qdrant/ollama under memory pressure so
     # the main phantom process stays alive and can log the squeeze before it
     # is killed last.
@@ -70,6 +66,13 @@ services:
           # Qdrant and Ollama get their own caps below. The prior 2 GiB cap
           # cgroup-OOM-killed evolution subprocesses under load.
           memory: 8G
+          # Cap the total number of processes this service can create. A
+          # runaway evolution subprocess spawn loop is bounded here in
+          # addition to the Phase 0 application-layer mutex and the Phase 2
+          # cadence. Compose v5+ requires pids to live under
+          # deploy.resources.limits alongside memory; using both top-level
+          # pids_limit and this block errors with "distinct values".
+          pids: 256
         reservations:
           memory: 512M
     networks:
