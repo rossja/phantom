@@ -22,7 +22,7 @@ Phantom is an autonomous AI co-worker that runs as a persistent Bun process on a
 
 **TypeScript is plumbing. The Agent SDK is the brain.**
 
-The Agent SDK (Opus 4.6) has full computer access: Read, Write, Edit, Bash, Glob, Grep, WebSearch, Agent tools. It can understand natural language, read code, explore repos, detect tech stacks, clone repos, install packages, write configs, and reason about anything.
+The Agent SDK (Opus 4.7) has full computer access: Read, Write, Edit, Bash, Glob, Grep, WebSearch, Agent tools. It can understand natural language, read code, explore repos, detect tech stacks, clone repos, install packages, write configs, and reason about anything.
 
 TypeScript handles: starting processes, routing messages, managing sessions, storing data, serving HTTP endpoints, tracking state. Mechanical, deterministic work.
 
@@ -148,7 +148,7 @@ docs/                   # Documentation (architecture, channels, mcp, security, 
 
 ## Architecture Overview
 
-Message flow: Slack message -> SlackChannel adapter -> ChannelRouter -> SessionManager (find/create session) -> PromptAssembler (base + role + evolved config + memory context) -> AgentRuntime.query() (Opus 4.6 with full tools) -> response -> ChannelRouter -> Slack thread reply. Web chat uses the same flow: POST /chat/sessions/:id/message -> SSE stream of wire frames -> React client renders in real time. Two separate transcripts (wire-format message store for the client, SDK conversation for the agent) are kept in sync.
+Message flow: Slack message -> SlackChannel adapter -> ChannelRouter -> SessionManager (find/create session) -> PromptAssembler (base + role + evolved config + memory context) -> AgentRuntime.query() (Opus 4.7 with full tools) -> response -> ChannelRouter -> Slack thread reply. Web chat uses the same flow: POST /chat/sessions/:id/message -> SSE stream of wire frames -> React client renders in real time. Two separate transcripts (wire-format message store for the client, SDK conversation for the agent) are kept in sync.
 
 After each session: EvolutionEngine runs 6-step reflection pipeline -> 5-gate validation -> approved changes applied to phantom-config/ -> version bumped.
 

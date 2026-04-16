@@ -545,7 +545,8 @@
 		// their first http hook because http is a different risk
 		// profile. Type check happens again at save time so a type
 		// switch inside the builder gets caught.
-		state.editing = { mode: "new", draft: blankDraft() };
+		var draft = blankDraft();
+		state.editing = { mode: "new", draft: draft, initialDraft: JSON.stringify(draft) };
 		render();
 	}
 
@@ -554,12 +555,14 @@
 		if (!group) return;
 		var def = (group.hooks || [])[hookIndex];
 		if (!def) return;
+		var draft = { event: event, matcher: group.matcher || "", definition: JSON.parse(JSON.stringify(def)) };
 		state.editing = {
 			mode: "edit",
 			event: event,
 			groupIndex: groupIndex,
 			hookIndex: hookIndex,
-			draft: { event: event, matcher: group.matcher || "", definition: JSON.parse(JSON.stringify(def)) },
+			draft: draft,
+			initialDraft: JSON.stringify(draft),
 		};
 		render();
 	}
@@ -752,7 +755,12 @@
 		root = container;
 		ctx.setBreadcrumb("Hooks");
 		if (!state.initialized) {
-			ctx.registerDirtyChecker(function () { return state.editing != null; });
+			ctx.registerDirtyChecker(function () {
+				if (state.editing == null) return false;
+				// Compare current draft to the initial snapshot taken on
+				// modal open. Opening "Edit" without typing is not dirty.
+				return JSON.stringify(state.editing.draft) !== state.editing.initialDraft;
+			});
 			state.initialized = true;
 		}
 		return loadList();

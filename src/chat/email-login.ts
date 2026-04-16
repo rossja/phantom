@@ -13,7 +13,7 @@ export function clearRateLimits(): void {
 	rateLimitMap.clear();
 }
 
-export async function handleEmailLogin(req: Request, publicUrl: string): Promise<Response> {
+export async function handleEmailLogin(req: Request, publicUrl: string, agentName: string): Promise<Response> {
 	const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
 	// Rate limit check
@@ -54,7 +54,7 @@ export async function handleEmailLogin(req: Request, publicUrl: string): Promise
 	const { magicToken } = createSession();
 	const magicUrl = `${publicUrl}/ui/login?magic=${encodeURIComponent(magicToken)}&redirect=%2Fchat`;
 
-	await sendLoginEmail(ownerEmail, magicUrl, process.env.PHANTOM_AGENT_NAME ?? "Phantom");
+	await sendLoginEmail(ownerEmail, magicUrl, agentName);
 
 	// Evict expired entries to prevent unbounded map growth
 	if (rateLimitMap.size > 1000) {

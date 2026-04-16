@@ -20,7 +20,12 @@
 		if (state.currentFile.read_only) return false;
 		var el = document.getElementById("memfile-body");
 		if (!el) return false;
-		return el.value !== state.lastLoadedContent;
+		// HTML spec: textareas strip a single leading newline from their
+		// initial value. Normalize the baseline the same way so files that
+		// begin with "\n" do not read as dirty on every mount.
+		var baseline = state.lastLoadedContent || "";
+		if (baseline.charAt(0) === "\n") baseline = baseline.slice(1);
+		return el.value !== baseline;
 	}
 
 	function filteredFiles() {

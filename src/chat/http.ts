@@ -37,6 +37,7 @@ export type ChatHandlerDeps = {
 	vapidKeys?: VapidKeyPair;
 	focusMap?: SessionFocusMap;
 	ownerEmail?: string;
+	agentName?: string;
 	notificationTriggers?: NotificationTriggerService;
 };
 
@@ -246,7 +247,7 @@ async function handlePushTest(deps: ChatHandlerDeps): Promise<Response> {
 	if (!deps.db || !deps.vapidKeys) {
 		return Response.json({ error: "Push not configured" }, { status: 503 });
 	}
-	const payload = testPayload();
+	const payload = testPayload(deps.agentName);
 	const result = await broadcastNotification(deps.db, payload, deps.vapidKeys, deps.ownerEmail);
 	return Response.json({ ok: true, sent: result.sent, failed: result.failed });
 }

@@ -92,9 +92,9 @@ export function hardErrorPayload(sessionId: string, error: string): Notification
 	});
 }
 
-export function testPayload(): NotificationPayload {
+export function testPayload(agentName?: string): NotificationPayload {
 	return {
-		title: "Phantom",
+		title: agentName && agentName.length > 0 ? agentName : "Test notification",
 		body: "Push notifications are working",
 		tag: "test-notification",
 		data: {

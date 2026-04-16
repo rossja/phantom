@@ -91,7 +91,7 @@ Switching providers is two lines of YAML:
 
 ```yaml
 # phantom.yaml
-model: claude-sonnet-4-6
+model: claude-opus-4-7
 provider:
   type: zai
   api_key_env: ZAI_API_KEY
@@ -116,7 +116,7 @@ docker compose up -d
 
 Your Phantom is running. Qdrant starts for memory, Ollama pulls the embedding model, and the agent boots. Check health at `http://localhost:3100/health`. With Slack configured, it DMs you when it's ready. Add `RESEND_API_KEY` for email sending. See [Getting Started](docs/getting-started.md) for full setup.
 
-> **Security note — Docker socket mount:** `docker-compose.yaml` mounts
+> **Security note, Docker socket mount:** `docker-compose.yaml` mounts
 > `/var/run/docker.sock` into the Phantom container so it can spawn sibling
 > containers (e.g. sandboxed code execution). This is an intentional
 > architectural trade-off: the socket grants the container **root-equivalent
@@ -265,7 +265,7 @@ Because the agent that can only use pre-built tools hits a ceiling. Phantom buil
 
 ## Connect from Claude
 
-First, generate a token. The command outputs a bearer token — save it for the next step.
+First, generate a token. The command outputs a bearer token. Save it for the next step.
 
 **Bare metal:**
 ```bash

@@ -6,6 +6,11 @@
 const VERSION = "0.1.0";
 const SHELL_CACHE = "phantom-chat-shell-" + VERSION;
 
+// Agent name posted by the client on every AppShell mount. Used as the
+// fallback notification title when the push payload omits one. Falls
+// back to data.body when nothing has been posted yet.
+var agentName = "";
+
 self.addEventListener("install", function (event) {
   self.skipWaiting();
 });
@@ -98,7 +103,11 @@ self.addEventListener("push", function (event) {
       data = { body: event.data.text() };
     }
   }
-  var title = data.title || "Phantom";
+  // Fallback order: payload title, posted agent name, payload body.
+  // Skip the notification when nothing is available rather than flashing
+  // a hardcoded product name over the real agent's identity.
+  var title = data.title || agentName || data.body || "";
+  if (!title) return;
   var options = {
     body: data.body || "",
     icon: "/chat/favicon.svg",
@@ -141,5 +150,8 @@ self.addEventListener("notificationclick", function (event) {
 self.addEventListener("message", function (event) {
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
+  }
+  if (event.data && event.data.type === "SET_AGENT_NAME" && typeof event.data.agentName === "string") {
+    agentName = event.data.agentName;
   }
 });

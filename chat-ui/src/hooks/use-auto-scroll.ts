@@ -35,16 +35,10 @@ export function useAutoScroll(): {
       }
     };
 
-    const observer = new ResizeObserver(() => {
-      if (!userScrolledRef.current) {
-        el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
-      }
-    });
-
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    observer.observe(el);
-
-    // Watch for direct child mutations to auto-scroll on new messages
+    // MutationObserver alone is enough: every new message is a direct
+    // child append and every delta update triggers a childList mutation.
+    // Previous double-observer (ResizeObserver + MutationObserver) caused
+    // two reflows per tick and visible jitter on slower devices.
     let rafPending = false;
     const mutationObserver = new MutationObserver(() => {
       if (!userScrolledRef.current && !rafPending) {
@@ -55,11 +49,12 @@ export function useAutoScroll(): {
         });
       }
     });
-    mutationObserver.observe(el, { childList: true });
+    mutationObserver.observe(el, { childList: true, subtree: true });
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => {
       el.removeEventListener("scroll", handleScroll);
-      observer.disconnect();
       mutationObserver.disconnect();
     };
   }, []);
