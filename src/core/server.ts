@@ -9,7 +9,7 @@ import type { MemoryHealth } from "../memory/types.ts";
 import type { SchedulerHealthSummary } from "../scheduler/health.ts";
 import { handleUiRequest } from "../ui/serve.ts";
 
-const VERSION = "0.19.0";
+const VERSION = "0.19.1";
 
 type ChatHandler = (req: Request) => Promise<Response | null>;
 
