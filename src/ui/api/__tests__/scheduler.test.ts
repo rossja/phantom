@@ -123,6 +123,27 @@ describe("scheduler API", () => {
 		expect(auditRows[0].actor).toBe("user");
 	});
 
+	test("POST honors enabled=false and persists the disabled state", async () => {
+		const res = await handleUiRequest(
+			req("/ui/api/scheduler", {
+				method: "POST",
+				body: hnBody({ name: "disabled-on-create", enabled: false }),
+			}),
+		);
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { job: { id: string; enabled: boolean } };
+		expect(body.job.enabled).toBe(false);
+		const row = db.query("SELECT enabled FROM scheduled_jobs WHERE id = ?").get(body.job.id) as { enabled: number };
+		expect(row.enabled).toBe(0);
+	});
+
+	test("POST defaults enabled=true when the field is omitted", async () => {
+		const res = await handleUiRequest(req("/ui/api/scheduler", { method: "POST", body: hnBody() }));
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { job: { enabled: boolean } };
+		expect(body.job.enabled).toBe(true);
+	});
+
 	test("POST with invalid schedule returns 400", async () => {
 		const res = await handleUiRequest(
 			req("/ui/api/scheduler", {

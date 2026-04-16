@@ -388,16 +388,19 @@ describe("Scheduler", () => {
 		expect(nextMs).toBeLessThan(Date.now() + 120_000);
 	});
 
-	test("resumeJob resets consecutive_errors", () => {
+	test("resumeJob resets consecutive_errors when resuming a paused job", () => {
 		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
 		const job = scheduler.createJob({
 			name: "ErrorBurn",
 			schedule: { kind: "every", intervalMs: 60_000 },
 			task: "Burn",
 		});
+		// Pause first so resume is a legitimate transition.
+		scheduler.pauseJob(job.id);
 		db.run("UPDATE scheduled_jobs SET consecutive_errors = 4 WHERE id = ?", [job.id]);
 
 		const resumed = scheduler.resumeJob(job.id);
+		expect(resumed?.status).toBe("active");
 		expect(resumed?.consecutiveErrors).toBe(0);
 	});
 
@@ -405,6 +408,40 @@ describe("Scheduler", () => {
 		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
 		const resumed = scheduler.resumeJob("nope");
 		expect(resumed).toBeNull();
+	});
+
+	test("resumeJob is a no-op on a non-paused job (active, failed, completed)", () => {
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		const job = scheduler.createJob({
+			name: "ActiveJob",
+			schedule: { kind: "every", intervalMs: 60_000 },
+			task: "Fire",
+		});
+		// active -> resume must be a no-op, not flip to active again.
+		const resumed = scheduler.resumeJob(job.id);
+		expect(resumed?.status).toBe("active");
+
+		// Force terminal states and verify resumeJob refuses to revive them.
+		db.run("UPDATE scheduled_jobs SET status = 'failed' WHERE id = ?", [job.id]);
+		const stillFailed = scheduler.resumeJob(job.id);
+		expect(stillFailed?.status).toBe("failed");
+
+		db.run("UPDATE scheduled_jobs SET status = 'completed' WHERE id = ?", [job.id]);
+		const stillCompleted = scheduler.resumeJob(job.id);
+		expect(stillCompleted?.status).toBe("completed");
+	});
+
+	test("createJob honors enabled=false by inserting an inactive row", () => {
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		const job = scheduler.createJob({
+			name: "DisabledJob",
+			schedule: { kind: "every", intervalMs: 60_000 },
+			task: "Fire",
+			enabled: false,
+		});
+		expect(job.enabled).toBe(false);
+		const row = db.query("SELECT enabled FROM scheduled_jobs WHERE id = ?").get(job.id) as { enabled: number };
+		expect(row.enabled).toBe(0);
 	});
 
 	test("paused job is excluded from the armTimer MIN query", async () => {

@@ -193,6 +193,7 @@ async function handleCreate(req: Request, deps: SchedulerApiDeps): Promise<Respo
 		schedule: input.schedule,
 		task: input.task,
 		deleteAfterRun: input.deleteAfterRun,
+		enabled: input.enabled,
 		createdBy: input.createdBy ?? "user",
 		...(input.delivery
 			? {

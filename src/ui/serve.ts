@@ -59,7 +59,9 @@ export function clearSchedulerInstanceForTests(): void {
 }
 
 // Test-only seam. Production wiring leaves this null so the handler falls
-// back to the default parseJobDescription (Anthropic SDK + env var).
+// back to the default parseJobDescription, which routes through the Agent
+// SDK subprocess (runJudgeQuery) so subscription auth or API key auth both
+// work without code changes.
 export function setSchedulerParserOverrideForTests(fn: (description: string) => Promise<ParseResult>): void {
 	schedulerParserOverride = fn;
 }

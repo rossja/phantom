@@ -235,7 +235,7 @@
 		var errors = job.consecutiveErrors || 0;
 		var lastCell = job.lastRunAt ? (job.lastRunStatus === "ok" ? "ok " : "err ") + relativeTime(job.lastRunAt) : "never";
 		var errorBadge = errors > 0 ? '<span class="dash-status-chip dash-status-chip-failed">' + esc(String(errors)) + '</span>' : '<span class="phantom-muted">0</span>';
-		var nextLabel = job.nextRunAt ? relativeTime(job.nextRunAt) : (job.status === "paused" ? "paused" : "\u2014");
+		var nextLabel = job.nextRunAt ? relativeTime(job.nextRunAt) : (job.status === "paused" ? "paused" : "-");
 		return '<tr class="dash-table-row" data-clickable="true" data-job-id="' + esc(job.id) + '" tabindex="0" role="button" aria-label="Open job ' + esc(job.name) + '">' +
 			'<td class="dash-table-cell dash-table-cell-mono">' + esc(job.name) + '</td>' +
 			'<td class="dash-table-cell dash-table-cell-mono phantom-muted">' + esc(humanSchedule(job.schedule)) + '</td>' +
@@ -986,8 +986,10 @@
 		var v = t.values, f = defaultForm();
 		f.name = v.name; f.description = v.description || ""; f.task = v.task || "";
 		f.enabled = v.enabled !== false;
+		// Templates ship "every", "cron", or "at" only. UI-only "daily" never
+		// appears in template values; it's exposed in the manual editor and
+		// translated to cron at submit.
 		if (v.schedule.kind === "every") { f.schedule.kind = "every"; f.schedule.unit = v.schedule.unit || "hours"; f.schedule.value = v.schedule.value || 1; }
-		else if (v.schedule.kind === "daily") { f.schedule.kind = "daily"; f.schedule.expr = v.schedule.expr || ""; f.schedule.at = v.schedule.time || "09:00"; f.schedule.tz = v.schedule.tz || defaultTz(); }
 		else if (v.schedule.kind === "cron") { f.schedule.kind = "cron"; f.schedule.expr = v.schedule.expr; f.schedule.tz = v.schedule.tz || defaultTz(); }
 		else if (v.schedule.kind === "at") { f.schedule.kind = "once"; f.schedule.at = v.schedule.at || ""; f.schedule.tz = v.schedule.tz || defaultTz(); }
 		if (v.delivery) { f.delivery.channel = v.delivery.channel || "slack"; f.delivery.targetKind = v.delivery.targetKind || "owner"; f.delivery.target = v.delivery.target || ""; }
@@ -1198,6 +1200,7 @@
 			name: f.name.trim(),
 			task: f.task,
 			schedule: buildServerSchedule(f.schedule),
+			enabled: f.enabled !== false,
 			createdBy: "user",
 		};
 		if (f.description.trim()) payload.description = f.description.trim();

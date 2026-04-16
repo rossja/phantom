@@ -24,6 +24,7 @@ export const JobCreateInputSchema = z.object({
 		.max(32 * 1024),
 	delivery: JobDeliverySchema.optional(),
 	deleteAfterRun: z.boolean().optional(),
+	enabled: z.boolean().optional(),
 	createdBy: z.enum(["agent", "user"]).optional(),
 });
 
