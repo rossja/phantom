@@ -1735,15 +1735,15 @@ body {
 	font-size: 11px;
 	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
 }
-/* 8-color palette for segments, swatches share by index. */
-.dash-channel-bar-segment[data-channel-idx="0"], .dash-channel-bar-swatch[data-channel-idx="0"] { background: var(--color-primary); }
-.dash-channel-bar-segment[data-channel-idx="1"], .dash-channel-bar-swatch[data-channel-idx="1"] { background: var(--color-info); }
-.dash-channel-bar-segment[data-channel-idx="2"], .dash-channel-bar-swatch[data-channel-idx="2"] { background: var(--color-success); }
-.dash-channel-bar-segment[data-channel-idx="3"], .dash-channel-bar-swatch[data-channel-idx="3"] { background: var(--color-warning); }
-.dash-channel-bar-segment[data-channel-idx="4"], .dash-channel-bar-swatch[data-channel-idx="4"] { background: #a855f7; }
-.dash-channel-bar-segment[data-channel-idx="5"], .dash-channel-bar-swatch[data-channel-idx="5"] { background: #ec4899; }
-.dash-channel-bar-segment[data-channel-idx="6"], .dash-channel-bar-swatch[data-channel-idx="6"] { background: #0891b2; }
-.dash-channel-bar-segment[data-channel-idx="7"], .dash-channel-bar-swatch[data-channel-idx="7"] { background: #d97706; }
+/* 8-color palette for segments, swatches, and glyph dots share by index. */
+[data-channel-idx="0"].dash-channel-bar-segment, [data-channel-idx="0"].dash-channel-bar-swatch, [data-channel-idx="0"].dash-channel-glyph-dot { background: var(--color-primary); }
+[data-channel-idx="1"].dash-channel-bar-segment, [data-channel-idx="1"].dash-channel-bar-swatch, [data-channel-idx="1"].dash-channel-glyph-dot { background: var(--color-info); }
+[data-channel-idx="2"].dash-channel-bar-segment, [data-channel-idx="2"].dash-channel-bar-swatch, [data-channel-idx="2"].dash-channel-glyph-dot { background: var(--color-success); }
+[data-channel-idx="3"].dash-channel-bar-segment, [data-channel-idx="3"].dash-channel-bar-swatch, [data-channel-idx="3"].dash-channel-glyph-dot { background: var(--color-warning); }
+[data-channel-idx="4"].dash-channel-bar-segment, [data-channel-idx="4"].dash-channel-bar-swatch, [data-channel-idx="4"].dash-channel-glyph-dot { background: #a855f7; }
+[data-channel-idx="5"].dash-channel-bar-segment, [data-channel-idx="5"].dash-channel-bar-swatch, [data-channel-idx="5"].dash-channel-glyph-dot { background: #ec4899; }
+[data-channel-idx="6"].dash-channel-bar-segment, [data-channel-idx="6"].dash-channel-bar-swatch, [data-channel-idx="6"].dash-channel-glyph-dot { background: #0891b2; }
+[data-channel-idx="7"].dash-channel-bar-segment, [data-channel-idx="7"].dash-channel-bar-swatch, [data-channel-idx="7"].dash-channel-glyph-dot { background: #d97706; }
 
 /* ---- .dash-status-chip: generic status pill. ----------------- */
 .dash-status-chip {
