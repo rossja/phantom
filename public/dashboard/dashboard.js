@@ -209,11 +209,6 @@
 		if (!container) return;
 		container.setAttribute("data-active", "true");
 		var labels = {
-			sessions: {
-				eyebrow: "soon",
-				title: "Sessions",
-				body: "A live view of every session the agent has had, with channels, costs, turn counts, and outcomes. Click through for full transcripts and the memories consolidated from each run.",
-			},
 			cost: {
 				eyebrow: "soon",
 				title: "Cost",
@@ -270,8 +265,8 @@
 		var name = parsed.route;
 		deactivateAllRoutes();
 
-		var liveRoutes = ["skills", "memory-files", "plugins", "subagents", "hooks", "settings"];
-		var comingSoon = ["sessions", "cost", "scheduler", "evolution", "memory"];
+		var liveRoutes = ["skills", "memory-files", "plugins", "subagents", "hooks", "settings", "sessions"];
+		var comingSoon = ["cost", "scheduler", "evolution", "memory"];
 
 		if (liveRoutes.indexOf(name) >= 0 && routes[name]) {
 			var containerId = "route-" + name;
