@@ -168,6 +168,10 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 				return handleUiRequest(req);
 			}
 
+			if (url.pathname === "/" || url.pathname === "") {
+				return Response.redirect("/ui/", 302);
+			}
+
 			return Response.json({ error: "Not found" }, { status: 404 });
 		},
 	});
