@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { MIGRATIONS } from "../../../db/schema.ts";
 import { handleUiRequest, setDashboardDb, setPublicDir } from "../../serve.ts";
 import { createSession, revokeAllSessions } from "../../session.ts";
-import { setIdentityDirForTests } from "../identity.ts";
+import { avatarUrlIfPresent, readAvatarMetaForManifest, setIdentityDirForTests } from "../identity.ts";
 
 setPublicDir(resolve(import.meta.dir, "../../../../public"));
 
@@ -322,5 +322,37 @@ describe("identity avatar API", () => {
 			new Request("http://localhost/ui/api/identity/avatar", { method: "GET", headers: authHeaders() }),
 		);
 		expect(res.status).toBe(405);
+	});
+
+	// Wire-contract helpers. These back /health avatar_url, /chat/bootstrap
+	// avatar_url, and the dynamic manifest's icon[] section. Test the helpers
+	// directly rather than the full HTTP round-trip because /health and the
+	// manifest live in core/server.ts and chat/http.ts, which have their own
+	// handlers outside handleUiRequest's scope.
+
+	test("avatarUrlIfPresent returns null when no avatar exists", () => {
+		expect(avatarUrlIfPresent()).toBeNull();
+	});
+
+	test("avatarUrlIfPresent returns /ui/avatar once an avatar is on disk", async () => {
+		await postAvatar("image/png", pngBytes(), "logo.png");
+		expect(avatarUrlIfPresent()).toBe("/ui/avatar");
+	});
+
+	test("avatarUrlIfPresent returns null again after DELETE", async () => {
+		await postAvatar("image/png", pngBytes(), "logo.png");
+		await handleUiRequest(
+			new Request("http://localhost/ui/api/identity/avatar", { method: "DELETE", headers: authHeaders() }),
+		);
+		expect(avatarUrlIfPresent()).toBeNull();
+	});
+
+	test("readAvatarMetaForManifest returns the mime of the uploaded avatar", async () => {
+		await postAvatar("image/jpeg", jpegBytes(30), "logo.jpg");
+		expect(readAvatarMetaForManifest()).toEqual({ mime: "image/jpeg" });
+	});
+
+	test("readAvatarMetaForManifest returns null when no avatar exists", () => {
+		expect(readAvatarMetaForManifest()).toBeNull();
 	});
 });

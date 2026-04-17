@@ -63,7 +63,7 @@
 	}
 
 	function applyAvatar(url) {
-		// null means "no avatar uploaded" — make sure any previously-inserted
+		// null means "no avatar uploaded", so make sure any previously-inserted
 		// img is removed and fallbacks are visible.
 		document.querySelectorAll("[data-agent-avatar]").forEach(function (slot) {
 			var existing = slot.querySelector("img[data-agent-avatar-img]");
