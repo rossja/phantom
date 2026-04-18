@@ -1,3 +1,4 @@
+import { resolve as pathResolve } from "node:path";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import type { SlackChannel } from "../channels/slack.ts";
 import { handleEmailLogin } from "../chat/email-login.ts";
@@ -8,7 +9,7 @@ import type { PhantomMcpServer } from "../mcp/server.ts";
 import type { MemoryHealth } from "../memory/types.ts";
 import type { SchedulerHealthSummary } from "../scheduler/health.ts";
 import { avatarUrlIfPresent, handleAvatarGet } from "../ui/api/identity.ts";
-import { handleUiRequest } from "../ui/serve.ts";
+import { getPublicDir, handleUiRequest } from "../ui/serve.ts";
 import { type HealthPayload, renderHealthHtml } from "./health-page.ts";
 
 const VERSION = "0.20.1";
@@ -195,6 +196,14 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 				if (response) return response;
 			}
 
+			// Public publishing surface. Agents drop HTML, XML, or assets
+			// under public/public/*. Served without auth so Googlebot,
+			// OpenGraph scrapers, and the open web can read them.
+			// Traversal-defended via path.resolve + containment check.
+			if (url.pathname === "/public" || url.pathname === "/public/" || url.pathname.startsWith("/public/")) {
+				return handlePublicRequest(url);
+			}
+
 			if (url.pathname.startsWith("/ui")) {
 				return handleUiRequest(req);
 			}
@@ -209,6 +218,44 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 
 	console.log(`[phantom] HTTP server listening on port ${config.port}`);
 	return server;
+}
+
+async function handlePublicRequest(url: URL): Promise<Response> {
+	const publicRoot = pathResolve(getPublicDir(), "public");
+	const isRoot = url.pathname === "/public" || url.pathname === "/public/";
+	const rawRel = isRoot ? "index.html" : url.pathname.slice("/public/".length);
+	// Decode percent-escapes so traversal sequences like ..%2F become visible
+	// to the containment check below. A malformed escape is rejected outright.
+	let rel: string;
+	try {
+		rel = decodeURIComponent(rawRel);
+	} catch {
+		return new Response("Forbidden", { status: 403 });
+	}
+	if (rel.includes("\0")) {
+		return new Response("Forbidden", { status: 403 });
+	}
+	const candidate = pathResolve(publicRoot, rel);
+	if (candidate !== publicRoot && !candidate.startsWith(`${publicRoot}/`)) {
+		return new Response("Forbidden", { status: 403 });
+	}
+	const file = Bun.file(candidate);
+	if (await file.exists()) {
+		return new Response(file, {
+			headers: { "Cache-Control": "public, max-age=300" },
+		});
+	}
+	// Directory-style index.html fallback (e.g. /public/blog/ -> public/public/blog/index.html)
+	const indexCandidate = pathResolve(candidate, "index.html");
+	if (indexCandidate !== candidate && indexCandidate.startsWith(`${publicRoot}/`)) {
+		const indexFile = Bun.file(indexCandidate);
+		if (await indexFile.exists()) {
+			return new Response(indexFile, {
+				headers: { "Cache-Control": "public, max-age=300" },
+			});
+		}
+	}
+	return new Response("Not found", { status: 404 });
 }
 
 async function handleTrigger(req: Request): Promise<Response> {
