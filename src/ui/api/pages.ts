@@ -32,7 +32,7 @@ const EXCLUDED_FILENAMES = new Set([
 	"robots.txt",
 ]);
 
-const EXCLUDED_ROOT_DIRS = new Set(["dashboard", "_examples", "chat"]);
+const EXCLUDED_ROOT_DIRS = new Set(["dashboard", "_examples", "chat", "public"]);
 
 const TITLE_REGEX = /<title[^>]*>([^<]*)<\/title>/i;
 const MAX_TITLE_LEN = 120;
