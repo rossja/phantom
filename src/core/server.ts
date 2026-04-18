@@ -12,7 +12,7 @@ import { avatarUrlIfPresent, handleAvatarGet } from "../ui/api/identity.ts";
 import { getPublicDir, handleUiRequest } from "../ui/serve.ts";
 import { type HealthPayload, renderHealthHtml } from "./health-page.ts";
 
-const VERSION = "0.20.1";
+const VERSION = "0.20.2";
 
 type ChatHandler = (req: Request) => Promise<Response | null>;
 
