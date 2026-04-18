@@ -202,6 +202,40 @@ Full checklist at `docs/deploy-checklist.md`. Both modes are first-class.
 
 Production deployments are managed internally. Do NOT modify production deployments without explicit approval. Code-only updates use rsync with --exclude for config/phantom-config/data.
 
+### Deploy gotchas (read before any Docker redeploy or fresh VM provision)
+
+For a **fresh VM from scratch with the latest local source**, follow `docs/deploy-new-phantom.md`. It captures every trap we have hit including stale SSH host keys, the `phantom-config/` build-context requirement on first deploy, pre-chowning ALL named volumes to uid 999 before the first `docker compose up`, the `claude login` flow over docker exec, the iTerm paste-into-TUI workaround, and the Slack token sharing trap.
+
+For an **update to an existing Docker deployment**, three specific traps to never repeat:
+
+**1. rsync with multiple trailing-slash sources merges into the target root.** Do NOT pass several `dir/` sources to a single target. The contents collapse together and `--delete` then wipes the original directory names. Always one rsync per source directory:
+
+```bash
+rsync -az --delete src/     specter@<IP>:/home/specter/phantom/src/
+rsync -az --delete public/  specter@<IP>:/home/specter/phantom/public/
+rsync -az --delete scripts/ specter@<IP>:/home/specter/phantom/scripts/
+```
+
+**2. Alpine overlays into the `phantom_public` (or any phantom) volume must chown to uid 999.** Phantom inside the container runs as `uid=999(phantom)`. The host source files are owned by `specter` at uid 1000, and `cp -av` preserves numeric ownership. Without the chown, the volume ends up owned by uid 1000 and the phantom container cannot write to `/app/public` (or wherever the volume mounts). Bake the chown into the overlay:
+
+```bash
+docker run --rm \
+  -v phantom_phantom_public:/dst \
+  -v /home/specter/phantom/public:/src \
+  alpine sh -c 'cp -av /src/. /dst/ && chown -R 999:999 /dst'
+```
+
+**3. New Docker volumes are root-owned by default.** When `docker compose up` creates a fresh named volume, the volume root is owned by `root:root`, not by the container's user. Phantom's first-boot entrypoint then crashes with `Permission denied` when it tries to seed skills, plugins, or phantom-config into the volume. **Pre-create and pre-chown every named volume BEFORE the first `docker compose up`** on a fresh VM:
+
+```bash
+for vol in phantom_phantom_claude phantom_phantom_evolved phantom_phantom_data phantom_phantom_public; do
+  docker volume create $vol
+  docker run --rm -v $vol:/dst alpine chown -R 999:999 /dst
+done
+```
+
+Verify after every deploy with `docker exec phantom sh -c 'touch /app/public/_w && rm /app/public/_w && echo OK'`. If write fails, repeat the chown step on the affected volume.
+
 ## Known Bugs
 
 1. **Onboarding re-fires on restart (LOW):** When evolution generation is 0, the intro DM sends again on restart. Needs an "intro_sent" flag in SQLite.
