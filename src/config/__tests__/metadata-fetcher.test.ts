@@ -129,4 +129,25 @@ describe("MetadataSecretFetcher", () => {
 		await fetcher.get("a_secret_with_no_special_chars");
 		expect(recordedUrls[0]).toBe("http://gateway.test/v1/secrets/a_secret_with_no_special_chars");
 	});
+
+	test("304 with no cached entry surfaces as an error containing the secret name", async () => {
+		// 304-without-cache is a server bug. Pin the loud-error behaviour so a
+		// future refactor that inverted the `if (!cached)` test would fail here.
+		globalThis.fetch = mock(() => Promise.resolve(new Response(null, { status: 304 }))) as unknown as typeof fetch;
+
+		const fetcher = new MetadataSecretFetcher("http://gateway.test");
+		await expect(fetcher.get("provider_token")).rejects.toThrow(/304/);
+		await expect(fetcher.get("provider_token")).rejects.toThrow(/provider_token/);
+	});
+
+	test("network error from underlying fetch is wrapped with the secret name", async () => {
+		// Transport failures (DNS, ECONNREFUSED, TLS) must be wrapped with the
+		// secret name so the operator can see which fetch call failed without
+		// leaking response bodies (there is no body on a transport error).
+		globalThis.fetch = mock(() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
+
+		const fetcher = new MetadataSecretFetcher("http://gateway.test");
+		await expect(fetcher.get("provider_token")).rejects.toThrow(/provider_token/);
+		await expect(fetcher.get("provider_token")).rejects.toThrow(/ECONNREFUSED/);
+	});
 });

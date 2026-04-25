@@ -29,8 +29,17 @@ export const ProviderSchema = z
 		// plaintext is injected into process.env.ANTHROPIC_API_KEY /
 		// ANTHROPIC_AUTH_TOKEN before buildProviderEnv runs. Default
 		// "provider_token" so a Cloud tenant who flips secret_source to
-		// metadata gets the right behavior with no further config.
-		secret_name: z.string().min(1).default("provider_token"),
+		// metadata gets the right behavior with no further config. The regex
+		// matches the metadata fetcher's defense-in-depth check; pinning it at
+		// the schema level surfaces invalid names at parse time rather than
+		// crashing at boot inside the fetcher.
+		secret_name: z
+			.string()
+			.regex(/^[a-z_][a-z0-9_]*$/, {
+				message:
+					"secret_name must match /^[a-z_][a-z0-9_]*$/ (lowercase letters, digits, underscores; cannot start with a digit)",
+			})
+			.default("provider_token"),
 		model_mappings: z
 			.object({
 				opus: z.string().min(1).optional(),

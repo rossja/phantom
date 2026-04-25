@@ -22,6 +22,13 @@
 // plaintext. By requiring whole-string matches, the resolved replacement IS
 // the plaintext itself, never a string containing the plaintext, so the
 // surface for accidental disclosure is the existing `process.env` surface.
+//
+// Note on type safety: the walker treats the config as a generic
+// Record<string, unknown> so it can recurse over arbitrary nested objects.
+// The single `as unknown as Record<string, unknown>` cast at the entry point
+// (where loadConfig hands the typed PhantomConfig to interpolateSecretsInPlace)
+// is the only place we cross the typed/generic boundary; the walker itself
+// does not introduce further casts beyond a recursive descent step.
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
