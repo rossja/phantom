@@ -152,36 +152,7 @@ export class SlackChannel implements Channel {
 	}
 
 	async send(conversationId: string, message: OutboundMessage): Promise<SentMessage> {
-<<<<<<< HEAD
-		const { channel, threadTs } = parseConversationId(conversationId);
-		const formattedText = toSlackMarkdown(message.text);
-		const replyThreadTs = message.threadId ?? threadTs;
-		const chunks = splitMessage(formattedText);
-		let lastTs = "";
-
-		for (const chunk of chunks) {
-			const result = await this.app.client.chat.postMessage({
-				channel,
-				text: chunk,
-				thread_ts: replyThreadTs,
-			});
-			lastTs = result.ts ?? "";
-		}
-
-		// Track thread participation so we can respond to replies without @ mention
-		if (replyThreadTs) {
-			this.participatedThreads.add(`${channel}:${replyThreadTs}`);
-		}
-
-		return {
-			id: lastTs || randomUUID(),
-			channelId: this.id,
-			conversationId,
-			timestamp: new Date(),
-		};
-=======
 		return egressSend(this.egressContext(), conversationId, message);
->>>>>>> upstream/main
 	}
 
 	onMessage(handler: (message: InboundMessage) => Promise<void>): void {
